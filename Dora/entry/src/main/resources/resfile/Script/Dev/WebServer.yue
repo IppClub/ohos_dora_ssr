@@ -1,0 +1,1165 @@
+--[[ Copyright (c) 2016-2025 Li Jin <dragon-fly@qq.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. ]]
+
+_ENV = Dora
+
+HttpServer\stop!
+
+HttpServer.wwwPath = Path Content.appPath, ".www"
+
+from "Utils" import LintYueGlobals
+
+getProjectDirFromFile = (file) ->
+	:writablePath, :assetPath = Content
+	parent, current = if (".." ~= Path\getRelative(file, writablePath)\sub 1, 2) and writablePath == file\sub 1, #writablePath
+		writablePath, Path\getRelative file, writablePath
+	elseif (".." ~= Path\getRelative(file, assetPath)\sub 1, 2) and assetPath == file\sub 1, #assetPath
+		dir = Path assetPath, "Script"
+		dir, Path\getRelative file, dir
+	else
+		nil, nil
+	return nil unless current
+	repeat
+		current = Path\getPath current
+		break if current == ""
+		for f in *Content\getFiles Path parent, current
+			if Path\getName(f)\lower! == "init"
+				return Path parent, current, Path\getPath f
+	until false
+	nil
+
+getSearchPath = (file): "" ->
+	if dir := getProjectDirFromFile file
+		return Path(dir, "Script", "?.lua") .. ";" .. Path dir, "?.lua"
+
+getSearchFolders = (file): [] ->
+	if dir := getProjectDirFromFile file
+		return
+			* Path dir, "Script"
+			* dir
+
+disabledCheckForLua =
+	* "incompatible number of returns"
+	* "unknown"
+	* "cannot index"
+	* "module not found"
+	* "don't know how to resolve"
+	* "ContainerItem"
+	* "cannot resolve a type"
+	* "invalid key"
+	* "inconsistent index type"
+	* "cannot use operator"
+	* "attempting ipairs loop"
+	* "expects record or nominal"
+	* "variable is not being assigned"
+	* "<invalid type>"
+	* "<any type>"
+	* "using the '#' operator"
+	* "can't match a record"
+	* "redeclaration of variable"
+	* "cannot apply pairs"
+	* "not a function"
+	* "to%-be%-closed"
+
+yueCheck = (file, content, lax) ->
+	searchPath = getSearchPath file
+	checkResult, luaCodes = yue.checkAsync content, searchPath, lax
+	info = []
+	globals = []
+	for [t, msg, line, col] in *checkResult
+		switch t when "error"
+			info[] = ["syntax", file, line, col, msg]
+		when "global"
+			globals[] = [msg, line, col]
+	if luaCodes
+		success, lintResult = LintYueGlobals luaCodes, globals, false
+		if success
+			luaCodes = luaCodes\gsub "%s*local%s*_ENV%s*=%s*Dora%([^%)]-%)[^\n\r]+[\n\r%s]*", "\n"
+			lintResult ..= "\n" unless lintResult == ""
+			luaCodes = "-- [yue]: #{file}\n#{lintResult}" .. luaCodes
+		else for [_name, line, col] in *lintResult
+			info[] = ["syntax", file, line, col, "invalid global variable"]
+	luaCodes, info
+
+luaCheck = (file, content) ->
+	res, err = load content, "check"
+	if not res
+		line, msg = err\match ".*:(%d+):%s*(.*)"
+		return success: false, info: [ ["syntax", file, tonumber(line), 0, msg],]
+	success, info = teal.checkAsync content, file, true, ""
+	if info
+		info = for item in *info
+			useCheck = true
+			if not item[5]\match "unused"
+				for check in *disabledCheckForLua
+					if item[5]\match check
+						useCheck = false
+			continue unless useCheck
+			switch item[1]
+				when "type"
+					item[1] = "warning"
+				when "parsing", "syntax"
+					continue
+			item
+		if #info == 0
+			info = nil
+			success = true
+	return :success, :info
+
+luaCheckWithLineInfo = (file, luaCodes) ->
+	res = luaCheck file, luaCodes
+	info = []
+	if not res.success
+		current = 1
+		lastLine = 1
+		lineMap = {}
+		for lineCode in luaCodes\gmatch "([^\r\n]*)\r?\n?"
+			num = lineCode\match "--%s*(%d+)%s*$"
+			if num
+				lastLine = tonumber num
+			lineMap[current] = lastLine
+			current += 1
+		for item in *res.info
+			item[3] = lineMap[item[3]] or 0
+			item[4] = 0
+			info[] = item
+		return false, info
+	return true, info
+
+getCompiledYueLine = (content, line, row, file, lax) ->
+	luaCodes, _info = yueCheck file, content, lax
+	return nil unless luaCodes
+	current = 1
+	lastLine = 1
+	targetLine = nil
+	targetRow = nil
+	lineMap = {}
+	for lineCode in luaCodes\gmatch "([^\r\n]*)\r?\n?"
+		num = lineCode\match "--%s*(%d+)%s*$"
+		lastLine = tonumber num if num
+		lineMap[current] = lastLine
+		if row <= lastLine and not targetLine
+			targetRow = current
+			targetLine = line\gsub("::", "\\")\gsub(":", "=")\gsub("\\", ":")\match "[%w_%.:]+$"
+			break if targetLine
+		current += 1
+	if targetLine and targetRow
+		luaCodes, targetLine, targetRow, lineMap
+	else
+		nil
+
+HttpServer\postSchedule "/check", (req): success: true ->
+	switch req when {body: {:file, :content}}
+		ext = Path\getExt file
+		switch ext when "tl"
+			searchPath = getSearchPath file
+			success, info = teal.checkAsync content, file, false, searchPath
+			return :success, :info
+		when "lua"
+			return luaCheck file, content
+		when "yue"
+			luaCodes, info = yueCheck file, content, false
+			success = false
+			if luaCodes
+				luaSuccess, luaInfo = luaCheckWithLineInfo file, luaCodes
+				info = [...info, ...luaInfo]
+				success and= luaSuccess
+			return if #info > 0
+				:success, :info
+			else
+				:success
+		when "xml"
+			success, result = xml.check content
+			if success
+				success, info = luaCheckWithLineInfo file, result
+				return if #info > 0
+					:success, :info
+				else
+					:success
+			else
+				info = for [row, err] in *result
+					["syntax", file, row, 0, err]
+				return success: false, :info
+
+updateInferedDesc = (infered) ->
+	return if not infered.key or infered.key == "" or infered.desc\match "^polymorphic function %(with types "
+	:key, :row = infered
+	if codes := Content\loadAsync key
+		comments = []
+		line = 0
+		skipping = false
+		for lineCode in codes\gmatch "([^\r\n]*)\r?\n?"
+			line += 1
+			break if line >= row
+			if lineCode\match "^%s*%-%- @"
+				skipping = true
+				continue
+			if result := lineCode\match "^%s*%-%- (.+)"
+				comments[] = result unless skipping
+			elseif #comments > 0
+				comments = []
+				skipping = false
+		infered.doc = table.concat comments, "\n"
+
+HttpServer\postSchedule "/infer", (req): success: false ->
+	switch req when {body: {:lang, :file, :content, :line, :row}}
+		searchPath = getSearchPath file
+		switch lang when "tl", "lua"
+			infered = teal.inferAsync content, line, row, searchPath
+			if infered?
+				updateInferedDesc infered
+				return success: true, :infered
+		when "yue"
+			luaCodes, targetLine, targetRow, lineMap = getCompiledYueLine content, line, row, file, false
+			return success: false unless luaCodes
+			infered = teal.inferAsync luaCodes, targetLine, targetRow, searchPath
+			if infered?
+				:file, :row, :col = infered
+				if file == "" and row > 0 and col > 0
+					infered.row = lineMap[row] or 0
+					infered.col = 0
+				updateInferedDesc infered
+				return success: true, :infered
+
+getParamDocs = (signatures): nil ->
+	if codes := Content\loadAsync signatures[1].file
+		comments = []
+		params = []
+		line = 0
+		docs = []
+		returnType = nil
+		for lineCode in codes\gmatch "([^\r\n]*)\r?\n?"
+			line += 1
+			needBreak = true
+			for i, {:row} in ipairs signatures
+				if line >= row and not docs[i]?
+					if #comments > 0 or #params > 0 or returnType
+						docs[i] = {
+							doc: table.concat comments, "  \n"
+							:returnType
+						}
+						docs[i].params = params if #params > 0
+					else
+						docs[i] = false
+				needBreak = false if not docs[i]
+			break if needBreak
+			if result := lineCode\match "%s*%-%- (.+)"
+				name, typ, desc = result\match "^@param%s*([%w_]+)%s*%(([^%)]-)%)%s*(.+)"
+				if not name
+					name, typ, desc = result\match "^@param%s*(%.%.%.)%s*%(([^%)]-)%)%s*(.+)"
+				if name
+					pname = name
+					pname ..= "?" if desc\match("%[optional%]") or desc\match "%[可选%]"
+					params[] = {
+						name: "#{pname}: #{typ}"
+						desc: "**#{name}**: #{desc}"
+					}
+				else
+					if typ := result\match "^@return%s*%(([^%)]-)%)"
+						returnType = if returnType
+							returnType .. ", " .. typ
+						else
+							typ
+						result = result\gsub "@return", "**return:**"
+					comments[] = result
+			elseif #comments > 0
+				comments = []
+				params = []
+				returnType = nil
+		results = []
+		for doc in *docs
+			continue unless doc
+			doc.desc = if doc.params
+				"function(#{table.concat [param.name for param in *doc.params], ', '})"
+			else
+				"function()"
+			if doc.returnType
+				doc.desc ..= ": #{doc.returnType}"
+				doc.returnType = nil
+			results[] = doc
+		return if #results > 0 then results else nil
+
+HttpServer\postSchedule "/signature", (req): success: false ->
+	switch req when {body: {:lang, :file, :content, :line, :row}}
+		searchPath = getSearchPath file
+		switch lang when "tl", "lua"
+			if signatures := teal.getSignatureAsync content, line, row, searchPath
+				if signatures := getParamDocs signatures
+					return success: true, :signatures
+		when "yue"
+			luaCodes, targetLine, targetRow, _lineMap = getCompiledYueLine content, line, row, file, false
+			return success: false unless luaCodes
+			if chainOp, chainCall := line\match "[^%w_]([%.\\])([^%.\\]+)$"
+				if withVar := luaCodes\match "([%w_]+)%.___DUMMY_CALL___%(%)"
+					targetLine = withVar .. (chainOp == '\\' and ':' or '.') .. chainCall
+			if signatures := teal.getSignatureAsync luaCodes, targetLine, targetRow, searchPath
+				if signatures := getParamDocs signatures
+					return success: true, :signatures
+			elseif signatures := teal.getSignatureAsync luaCodes, "Dora.#{targetLine}", targetRow, searchPath
+				if signatures := getParamDocs signatures
+					return success: true, :signatures
+
+luaKeywords = [
+	'and'
+	'break'
+	'do'
+	'else'
+	'elseif'
+	'end'
+	'false'
+	'for'
+	'function'
+	'goto'
+	'if'
+	'in'
+	'local'
+	'nil'
+	'not'
+	'or'
+	'repeat'
+	'return'
+	'then'
+	'true'
+	'until'
+	'while'
+]
+
+tealKeywords = [
+	'record'
+	'as'
+	'is'
+	'type'
+	'embed'
+	'enum'
+	'global'
+	'any'
+	'boolean'
+	'integer'
+	'number'
+	'string'
+	'thread'
+]
+
+yueKeywords = [
+	"and"
+	"break"
+	"do"
+	"else"
+	"elseif"
+	"false"
+	"for"
+	"goto"
+	"if"
+	"in"
+	"local"
+	"nil"
+	"not"
+	"or"
+	"repeat"
+	"return"
+	"then"
+	"true"
+	"until"
+	"while"
+	"as"
+	"class"
+	"continue"
+	"export"
+	"extends"
+	"from"
+	"global"
+	"import"
+	"macro"
+	"switch"
+	"try"
+	"unless"
+	"using"
+	"when"
+	"with"
+]
+
+HttpServer\postSchedule "/complete", (req): success: false ->
+	switch req when {body: {:lang, :file, :content, :line, :row}}
+		searchPath = getSearchPath file
+		repeat
+			item = line\match "require%s*%(%s*['\"]([%w%d-_%./ ]*)$"
+			if lang == "yue"
+				item = line\match "require%s*['\"]([%w%d-_%./ ]*)$" unless item
+				item = line\match "import%s*['\"]([%w%d-_%.]*)$" unless item
+			searchType = nil
+			if not item
+				item = line\match "Sprite%s*%(%s*['\"]([%w%d-_/ ]*)$"
+				if lang == "yue"
+					item = line\match "Sprite%s*['\"]([%w%d-_/ ]*)$"
+				searchType = "Image" if item?
+			if not item
+				item = line\match "Label%s*%(%s*['\"]([%w%d-_/ ]*)$"
+				if lang == "yue"
+					item = line\match "Label%s*['\"]([%w%d-_/ ]*)$"
+				searchType = "Font" if item?
+			break unless item
+			:searchPaths = Content
+			for folder in *getSearchFolders file
+				searchPaths[] = folder
+			searchPaths[] = Content.assetPath if searchType
+			tokens = [mod for mod in item\gmatch "([%w%d-_ ]+)[%./]"]
+			suggestions = []
+			for path in *searchPaths
+				sPath = Path path, table.unpack tokens
+				continue unless Content\exist sPath
+				if searchType == "Font"
+					fontPath = Path sPath, "Font"
+					if Content\exist fontPath
+						for f in *Content\getFiles fontPath
+							if Path\getExt(f) in ["ttf", "otf"]
+								continue if "." == f\sub 1, 1
+								suggestions[] = [Path\getName(f), "font", "field"]
+				for f in *Content\getFiles sPath
+					switch searchType when "Image"
+						switch Path\getExt f when "clip", "jpg", "png", "dds", "pvr", "ktx"
+							continue if "." == f\sub 1, 1
+							suggestions[] = [f, "image", "field"]
+						continue
+					when "Font"
+						switch Path\getExt f when "ttf", "otf"
+							continue if "." == f\sub 1, 1
+							suggestions[] = [f, "font", "field"]
+						continue
+					switch Path\getExt f when "lua", "tl", "yue", "xml"
+						name = Path\getName f
+						continue if "d" == Path\getExt name
+						continue if "." == name\sub 1, 1
+						suggestions[] = [name, "module", "field"]
+				for dir in *Content\getDirs sPath
+					continue if "." == dir\sub 1, 1
+					suggestions[] = [dir, "folder", "variable"]
+			if item == "" and not searchType
+				for [name,] in *teal.completeAsync "", "Dora.", 1, searchPath
+					suggestions[] = [name, "dora module", "function"]
+			if #suggestions > 0
+				suggestions = [v for _, v in pairs {item[1] .. item[2], item for item in *suggestions}]
+				return success: true, :suggestions
+			else
+				return success: false
+		until true
+		switch lang when "tl", "lua"
+			suggestions = teal.completeAsync content, line, row, searchPath
+			if not line\match("[%.:]$")
+				checkSet = {name, true for {name} in *suggestions}
+				for item in *teal.completeAsync "", "Dora.", 1, searchPath
+					suggestions[] = item if not checkSet[item[1]]
+				for word in *luaKeywords
+					suggestions[] = [word, "keyword", "keyword"]
+				if lang == "tl"
+					for word in *tealKeywords
+						suggestions[] = [word, "keyword", "keyword"]
+			if #suggestions > 0
+				return success: true, :suggestions
+		when "yue"
+			suggestions = []
+			gotGlobals = false
+			if luaCodes, targetLine, targetRow := getCompiledYueLine content, line, row, file, true
+				gotGlobals = true
+				if chainOp := line\match "[^%w_]([%.\\])$"
+					withVar = luaCodes\match "([%w_]+)%.___DUMMY_CALL___%(%)"
+					return success: false unless withVar
+					targetLine = "#{withVar}#{chainOp == '\\' and ':' or '.'}"
+				elseif line\match "^([%.\\])$"
+					return success: false
+				suggestions[] = item for item in *teal.completeAsync luaCodes, targetLine, targetRow, searchPath
+				if #suggestions == 0
+					suggestions[] = item for item in *teal.completeAsync luaCodes, "Dora.#{targetLine}", targetRow, searchPath
+			if not line\match("[%.:\\][%w_]+[%.\\]?$") and not line\match "[%.\\]$"
+				checkSet = {name, true for {name} in *suggestions}
+				for item in *teal.completeAsync "", "Dora.", 1, searchPath
+					suggestions[] = item if not checkSet[item[1]]
+				if not gotGlobals
+					for item in *teal.completeAsync "", "x", 1, searchPath
+						suggestions[] = item if not checkSet[item[1]]
+				for word in *yueKeywords
+					if not checkSet[word]
+						suggestions[] = [word, "keyword", "keyword"]
+			if #suggestions > 0
+				return success: true, :suggestions
+		when "xml"
+			items = xml.complete content
+			if #items > 0
+				suggestions = for [label, insertText] in *items
+					[label, insertText, "field"]
+				return success: true, :suggestions
+
+HttpServer\upload(
+	"/upload"
+	(req, filename): nil ->
+		switch req when {params: {:path}}
+			uploadPath = Path Content.appPath, ".upload"
+			if not Content\exist uploadPath
+				Content\mkdir uploadPath
+			targetPath = Path uploadPath, filename
+			Content\mkdir Path\getPath targetPath
+			return targetPath
+	(req, file): false ->
+		switch req when {params: {:path}}
+			path = Path Content.writablePath, path
+			if Content\exist path
+				uploadPath = Path Content.appPath, ".upload"
+				targetPath = Path path, Path\getRelative file, uploadPath
+				Content\mkdir Path\getPath targetPath
+				if Content\move file, targetPath
+					return true
+)
+
+HttpServer\post "/list", (req): success: false ->
+	switch req when {body: {:path}}
+		if Content\exist path
+			files = {}
+			visitAssets = (path, folder) ->
+				dirs = Content\getDirs path
+				for dir in *dirs
+					continue if dir\match "^%."
+					current = if folder == ""
+						dir
+					else
+						Path folder, dir
+					files[] = current
+					visitAssets Path(path, dir), current
+				fs = Content\getFiles path
+				for f in *fs
+					continue if f\match "^%."
+					files[] = if folder == ""
+						f
+					else
+						Path folder, f
+			visitAssets path, ""
+			files = nil if #files == 0
+			return success: true, :files
+
+HttpServer\post "/info", ->
+	import "Script.Dev.Entry"
+	:webProfiler, :drawerWidth = Entry.getConfig!
+	engineDev = Entry.getEngineDev!
+	Entry.connectWebIDE!
+	return
+		platform: App.platform
+		locale: App.locale
+		version: App.version
+		:engineDev
+		:webProfiler
+		:drawerWidth
+
+HttpServer\post "/new", (req): success: false ->
+	switch req when {body: {:path, :content, :folder}}
+		if not Content\exist path
+			parent = Path\getPath path
+			files = Content\getFiles parent
+			if folder
+				name = Path\getFilename(path)\lower!
+				for file in *files
+					if name == Path\getFilename(file)\lower!
+						return success: false
+				if Content\mkdir path
+					return success: true
+			else
+				name = Path\getName(path)\lower!
+				for file in *files
+					if name == Path\getName(file)\lower!
+						ext = Path\getExt file
+						if ext not in ["tl", "yue", "ts", "tsx", "vs", "bl", "xml", "lua"]
+							continue
+						elseif ("d" == Path\getExt name) and (ext ~= Path\getExt path)
+							continue
+						return success: false
+				if Content\save path, content
+					return success: true
+
+HttpServer\post "/delete", (req): success: false ->
+	switch req when {body: {:path}}
+		if Content\exist path
+			parent = Path\getPath path
+			files = Content\getFiles parent
+			name = Path\getName(path)\lower!
+			ext = Path\getExt path
+			for file in *files
+				if name == Path\getName(file)\lower!
+					switch Path\getExt file when "tl" then if ext in ["vs",]
+						Content\remove Path parent, file
+					when "lua" then if ext in ["tl", "yue", "ts", "tsx", "vs", "bl", "xml"]
+						Content\remove Path parent, file
+			if Content\remove path
+				return success: true
+
+HttpServer\post "/rename", (req): success: false ->
+	switch req when {body: {:old, :new}}
+		if Content\exist(old) and not Content\exist new
+			parent = Path\getPath new
+			files = Content\getFiles parent
+			if Content\isdir old
+				name = Path\getFilename(new)\lower!
+				for file in *files
+					if name == Path\getFilename(file)\lower!
+						return success: false
+			else
+				name = Path\getName(new)\lower!
+				ext = Path\getExt new
+				for file in *files
+					if name == Path\getName(file)\lower!
+						if ext not in ["tl", "yue", "ts", "tsx", "vs", "bl", "xml", "lua"]
+							continue
+						elseif ("d" == Path\getExt name) and (Path\getExt(file) ~= ext)
+							continue
+						return success: false
+			if Content\move old, new
+				newParent = Path\getPath new
+				parent = Path\getPath old
+				files = Content\getFiles parent
+				newName = Path\getName new
+				oldName = Path\getName old
+				name = oldName\lower!
+				ext = Path\getExt old
+				for file in *files
+					if name == Path\getName(file)\lower!
+						switch Path\getExt file when "tl" then if ext in ["vs",]
+							Content\move Path(parent, file), Path newParent, newName .. ".tl"
+						when "lua" then if ext in ["tl", "yue", "ts", "tsx", "vs", "bl", "xml"]
+							Content\move Path(parent, file), Path newParent, newName .. ".lua"
+				return success: true
+
+HttpServer\post "/exist", (req): success: false ->
+	switch req when {body: {:file}}
+		if projFile := req.body.projFile
+			if projDir := getProjectDirFromFile projFile
+				scriptDir = Path projDir, "Script"
+				:searchPaths = Content
+				Content\addSearchPath scriptDir if Content\exist scriptDir
+				Content\addSearchPath projDir if Content\exist projDir
+				close _ = <close>: -> Content.searchPaths = searchPaths
+				return success: Content\exist file
+		return success: Content\exist file
+
+HttpServer\postSchedule "/read", (req): success: false ->
+	switch req when {body: {:path}}
+		readFile = (): nil ->
+			if Content\exist path
+				if content := Content\loadAsync path
+					return :content, success: true
+		if projFile := req.body.projFile
+			if projDir := getProjectDirFromFile projFile
+				scriptDir = Path projDir, "Script"
+				:searchPaths = Content
+				Content\addSearchPath scriptDir if Content\exist scriptDir
+				Content\addSearchPath projDir if Content\exist projDir
+				close _ = <close>: -> Content.searchPaths = searchPaths
+				return result if result := readFile!
+		return result if result := readFile!
+
+HttpServer\post "/read-sync", (req): success: false ->
+	switch req when {body: {:path, :exts}}
+		readFile = (): nil ->
+			for ext in *exts
+				targetPath = path .. ext
+				if Content\exist targetPath
+					if content := Content\load targetPath
+						return :content, success: true, fullPath: Content\getFullPath targetPath
+		:searchPaths = Content
+		close _ = <close>: -> Content.searchPaths = searchPaths
+		if projFile := req.body.projFile
+			if projDir := getProjectDirFromFile projFile
+				scriptDir = Path projDir, "Script"
+				Content\addSearchPath scriptDir if Content\exist scriptDir
+				Content\addSearchPath projDir if Content\exist projDir
+			else
+				projDir = Path\getPath projFile
+				Content\addSearchPath projDir if Content\exist projDir
+		return result if result := readFile!
+
+compileFileAsync = (inputFile, sourceCodes): nil ->
+	file = inputFile
+	searchPath = if dir := getProjectDirFromFile inputFile
+		file = Path\getRelative inputFile, Path Content.writablePath, dir
+		Path(dir, "Script", "?.lua") .. ";" .. Path dir, "?.lua"
+	else
+		file = Path\getRelative inputFile, Content.writablePath
+		if file\sub(1, 2) == ".."
+			file = Path\getRelative inputFile, Content.assetPath
+		""
+	outputFile = Path\replaceExt inputFile, "lua"
+	options: {extension: yueext} = yue
+	resultCodes = nil
+	switch Path\getExt inputFile when yueext
+		(success) <- yue.compile inputFile, outputFile, searchPath, (codes, _err, globals) ->
+			return unless codes
+			success, result = LintYueGlobals codes, globals
+			return unless success
+			if codes == ""
+				resultCodes = ""
+				return nil
+			codes = codes\gsub "%s*local%s*_ENV%s*=%s*Dora%([^%)]-%)[^\n\r]+[\n\r%s]*", "\n"
+			codes = codes\gsub "%s*local%s*_ENV%s*=%s*Dora[^%w_$][^\n\r]+[\n\r%s]*", "\n"
+			codes = codes\gsub "^\n*", ""
+			result ..= "\n" unless result == ""
+			resultCodes = "-- [yue]: #{file}\n#{result}#{codes}"
+			resultCodes
+		if not success
+			Content\remove outputFile
+			if resultCodes == nil
+				resultCodes = false
+	when "tl"
+		if codes := teal.toluaAsync sourceCodes, file, searchPath
+			resultCodes = codes
+			Content\saveAsync outputFile, codes
+		else
+			Content\remove outputFile
+			resultCodes = false
+	when "xml"
+		if codes := xml.tolua sourceCodes
+			resultCodes = "-- [xml]: #{file}\n#{codes}"
+			Content\saveAsync outputFile, resultCodes
+		else
+			Content\remove outputFile
+			resultCodes = false
+	wait -> resultCodes ~= nil
+	return resultCodes if resultCodes
+
+HttpServer\postSchedule "/write", (req): success: false ->
+	switch req when {body: {:path, :content}}
+		if Content\saveAsync path, content
+			switch Path\getExt path when "tl", "yue", "xml"
+				if '' == Path\getExt Path\getName path
+					resultCodes = compileFileAsync path, content
+					return success: true, :resultCodes
+			return success: true
+
+HttpServer\postSchedule "/build", (req): success: false ->
+	switch req when {body: {:path}}
+		switch Path\getExt path when "tl", "yue", "xml"
+			if '' == Path\getExt Path\getName path
+				if content := Content\loadAsync path
+					if resultCodes := compileFileAsync path, content
+						return success: true, :resultCodes
+
+extentionLevels =
+	vs: 2
+	bl: 2
+	ts: 1
+	tsx: 1
+	tl: 1
+	yue: 1
+	xml: 1
+	lua: 0
+
+HttpServer\post "/assets", ->
+	import "Enum" as :$Enum
+	macro Tag = $Enum Workspace, Builtin
+	import "Script.Dev.Entry"
+	engineDev = Entry.getEngineDev!
+	visitAssets = (path, tag) ->
+		isWorkspace = tag == $Tag Workspace
+		builtin = if tag == $Tag Builtin then true else nil
+		children = nil
+		dirs = Content\getDirs path
+		for dir in *dirs
+			if isWorkspace
+				if dir in [".upload", ".download", ".www", ".build", ".git", ".cache"]
+					continue
+			elseif dir == ".git"
+				continue
+			children = [] unless children
+			children[] = visitAssets Path path, dir
+		files = Content\getFiles path
+		names = {}
+		for file in *files
+			continue if file\match "^%."
+			name = Path\getName file
+			if ext := names[name]
+				lv1 = extentionLevels[ext] ?? -1
+				ext = Path\getExt file
+				lv2 = extentionLevels[ext] ?? -1
+				if lv2 > lv1
+					names[name] = ext
+				elseif lv2 == lv1
+					names[name .. '.' .. ext] = ""
+			else
+				ext = Path\getExt file
+				if not extentionLevels[ext]
+					names[file] = ""
+				else
+					names[name] = ext
+		files = [ext == '' and name or name .. '.' .. ext for name, ext in pairs names]
+		for file in *files
+			children = [] unless children
+			children[] = {
+				key: Path path, file
+				dir: false
+				title: file
+				:builtin
+			}
+		if children
+			table.sort children, (a, b) ->
+				if a.dir == b.dir
+					a.title < b.title
+				else
+					a.dir
+		if isWorkspace and children
+			children
+		else
+			{
+				key: path
+				dir: true
+				title: Path\getFilename path
+				:builtin
+				:children
+			}
+	zh = App.locale\match("^zh")?
+	{
+		key: Content.writablePath
+		dir: true
+		root: true
+		title: "Assets"
+		children: [
+			{
+				key: Path Content.assetPath
+				dir: true
+				builtin: true
+				title: zh and "内置资源" or "Built-in"
+				children: [
+					with visitAssets (Path Content.assetPath, "Doc", zh and "zh-Hans" or "en"), $Tag Builtin
+						.title = zh and "说明文档" or "Readme"
+					with visitAssets (Path Content.assetPath, "Script", "Lib", "Dora", zh and "zh-Hans" or "en"), $Tag Builtin
+						.title = zh and "接口文档" or "API Doc"
+					with visitAssets (Path Content.assetPath, "Script", "Tools"), $Tag Builtin
+						.title = zh and "开发工具" or "Tools"
+					with visitAssets (Path Content.assetPath, "Font"), $Tag Builtin
+						.title = zh and "字体" or "Font"
+					with visitAssets (Path Content.assetPath, "Script", "Lib"), $Tag Builtin
+						.title = zh and "程序库" or "Lib"
+						if engineDev
+							for child in *.children
+								continue unless child.title == "Dora"
+								title = zh and "zh-Hans" or "en"
+								child.children = [c for c in *child.children when c.title ~= title]
+								break
+						else
+							.children = [child for child in *.children when child.title ~= "Dora"]
+					if engineDev
+						with visitAssets (Path Content.assetPath, "Script", "Dev"), $Tag Builtin
+							.children[] = {
+								key: Path Content.assetPath, "Script", "init.yue"
+								dir: false
+								builtin: true
+								title: "init.yue"
+							}
+				]
+			}
+			...visitAssets Content.writablePath, $Tag Workspace
+		]
+	}
+
+HttpServer\postSchedule "/run", (req): success: false ->
+	switch req when {body: {:file, :asProj}}
+		if not Content\isAbsolutePath file
+			devFile = Path Content.writablePath, file
+			file = devFile if Content\exist devFile
+		import "Script.Dev.Entry"
+		local workDir
+		if asProj
+			if workDir := getProjectDirFromFile file
+				Entry.allClear!
+				target = Path workDir, "init"
+				success, err = Entry.enterEntryAsync ["Project", target]
+				target = target |> Path\getPath |> Path\getName
+				return :success, :target, :err
+		else
+			workDir = getProjectDirFromFile file
+		Entry.allClear!
+		file = Path\replaceExt file, ""
+		success, err = Entry.enterEntryAsync {
+			Path\getName(file), file
+			:workDir
+		}
+		return :success, :err
+
+HttpServer\postSchedule "/stop", ->
+	import "Script.Dev.Entry"
+	success: Entry.stop!
+
+minifyAsync = (sourcePath, minifyPath) ->
+	return unless Content\exist sourcePath
+	import "Script.Dev.Entry"
+	errors = []
+	files = Entry.getAllFiles sourcePath, ["lua",], true
+	files = [file for file in *files when file\sub(1, 1) ~= '.']
+	paths = {Path\getPath(file), true for file in *files}
+	Content\mkdir Path(minifyPath, path) for path in pairs paths
+	close _ = <close>: ->
+		package.loaded["luaminify.FormatMini"] = nil
+		package.loaded["luaminify.ParseLua"] = nil
+		package.loaded["luaminify.Scope"] = nil
+		package.loaded["luaminify.Util"] = nil
+	from "luaminify" import FormatMini
+	fileCount = #files
+	count = 0
+	for file in *files
+		thread ->
+			close _ = <close>: -> count += 1
+			input = Path sourcePath, file
+			output = Path minifyPath, Path\replaceExt file, "lua"
+			if Content\exist input
+					sourceCodes = Content\loadAsync input
+					res, err = FormatMini sourceCodes
+					if res
+						Content\saveAsync output, res
+						print "Minify #{file}"
+					else
+						errors[] = "Minify errors in #{file}.\n#{err}"
+			else
+				errors[] = "Minify errors in #{file}.\nTarget file is not exist!"
+		sleep!
+	wait -> count == fileCount
+	if #errors > 0
+		print table.concat errors, '\n'
+	print "Obfuscation done."
+	files
+
+zipping = false
+
+HttpServer\postSchedule "/zip", (req): success: false ->
+	switch req when {body: {:path, :zipFile, :obfuscated}}
+		goto failed if zipping
+		zipping = true
+		close _ = <close>: -> zipping = false
+		goto failed unless Content\exist path
+		Content\mkdir Path\getPath zipFile
+		if obfuscated
+			scriptPath = Path Content.appPath, ".download", ".script"
+			obfuscatedPath = Path Content.appPath, ".download", ".obfuscated"
+			tempPath = Path Content.appPath, ".download", ".temp"
+			Content\remove scriptPath
+			Content\remove obfuscatedPath
+			Content\remove tempPath
+			Content\mkdir scriptPath
+			Content\mkdir obfuscatedPath
+			Content\mkdir tempPath
+			goto failed unless Content\copyAsync path, tempPath
+			import "Script.Dev.Entry"
+			luaFiles = minifyAsync tempPath, obfuscatedPath
+			scriptFiles = Entry.getAllFiles tempPath, ["tl", "yue", "lua", "ts", "tsx", "vs", "bl", "xml", "wa", "mod"], true
+			for file in *scriptFiles
+				Content\remove Path tempPath, file
+			for file in *luaFiles
+				Content\move Path(obfuscatedPath, file), Path tempPath, file
+			goto failed unless Content\zipAsync tempPath, zipFile, (file) ->
+				not (file\match('^%.') or file\match "[\\/]%.")
+			return success: true
+		else
+			return success: Content\zipAsync path, zipFile, (file) ->
+				not (file\match('^%.') or file\match "[\\/]%.")
+	::failed::
+
+HttpServer\postSchedule "/unzip", (req): success: false ->
+	switch req when {body: {:zipFile, :path}}
+		return success: Content\unzipAsync zipFile, path, (file) ->
+			not (file\match('^%.') or file\match("[\\/]%.") or file\match "__MACOSX")
+
+HttpServer\post "/editing-info", (req) ->
+	import "Script.Dev.Entry"
+	config = Entry.getConfig!
+	switch req when {body: {:editingInfo}}
+		config.editingInfo = editingInfo
+		success: true
+	else
+		if not config.editingInfo?
+			folder = if App.locale\match '^zh' then 'zh-Hans' else 'en'
+			config.editingInfo = json.dump {
+				index: 0
+				files: [
+					{
+						key: Path Content.assetPath, 'Doc', folder, 'welcome.md'
+						title: "welcome.md"
+					}
+				]
+			}
+		success: true, editingInfo: config.editingInfo
+
+HttpServer\post "/command", (req): success: false ->
+	switch req when {body: {:code, :log}}
+		emit "AppCommand", code, log
+		return success: true
+
+HttpServer\post "/log/save", (): success: false ->
+	folder = ".download"
+	fullLogFile = "dora_full_logs.txt"
+	fullFolder = Path Content.appPath, folder
+	Content\mkdir fullFolder
+	logPath = Path fullFolder, fullLogFile
+	if App\saveLog logPath
+		return success: true, path: Path folder, fullLogFile
+
+HttpServer\post "/yarn/check", (req): success: false ->
+	import "yarncompile"
+	switch req when {body: {:code}}
+		if jsonObject := json.load code
+			errors = []
+			for node in *jsonObject.nodes
+				:title, :body = node
+				unless luaCode, err := yarncompile body
+					errors[] = title .. ":" .. err
+			return success: true, syntaxError: table.concat errors, "\n\n"
+
+getWaProjectDirFromFile = (file) ->
+	:writablePath = Content
+	parent, current = if (".." ~= Path\getRelative(file, writablePath)\sub 1, 2) and writablePath == file\sub 1, #writablePath
+		writablePath, Path\getRelative file, writablePath
+	else
+		nil, nil
+	return nil unless current
+	repeat
+		current = Path\getPath current
+		break if current == ""
+		for f in *Content\getFiles Path parent, current
+			if Path\getFilename(f)\lower! == "wa.mod"
+				return Path parent, current, Path\getPath f
+	until false
+	nil
+
+HttpServer\postSchedule "/wa/build", (req) ->
+	switch req when {body: {:path}}
+		if projDir := getWaProjectDirFromFile path
+			message = Wasm\buildWaAsync projDir
+			return if message == ""
+				success: true
+			else 
+				success: false, :message
+		else
+			return success: false, message: 'Wa file needs a project'
+	success: false, message: 'failed to build'
+
+HttpServer\postSchedule "/wa/format", (req) ->
+	switch req when {body: {:file}}
+		code = Wasm\formatWaAsync file
+		return if code == ""
+			success: false
+		else 
+			success: true, :code
+	success: false
+
+HttpServer\postSchedule "/wa/create", (req): {success: false, message: "invalid call"} ->
+	switch req when {body: {:path}}
+		unless Content\exist Path\getPath path
+			return success: false, message: "target path not existed"
+		if Content\exist path
+			return success: false, message: "target project folder existed"
+		srcPath = Path Content.assetPath, "dora-wa", "src"
+		vendorPath = Path Content.assetPath, "dora-wa", "vendor"
+		modPath = Path Content.assetPath, "dora-wa", "wa.mod"
+		if not Content\exist(srcPath) or
+			not Content\exist(vendorPath) or
+			not Content\exist modPath
+			return success: false, message: "missing template project"
+		unless Content\mkdir path
+			return success: false, message: "failed to create project folder"
+		unless Content\copyAsync srcPath, Path path, "src"
+			Content\remove path
+			return success: false, message: "failed to copy template"
+		unless Content\copyAsync vendorPath, Path path, "vendor"
+			Content\remove path
+			return success: false, message: "failed to copy template"
+		unless Content\copyAsync modPath, Path path, "wa.mod"
+			Content\remove path
+			return success: false, message: "failed to copy template"
+		return success: true
+
+HttpServer\postSchedule "/ts/build", (req): success: false ->
+	switch req when {body: {:path}}
+		if HttpServer.wsConnectionCount == 0
+			return success: false, message: "Web IDE not connected"
+		unless Content\exist path
+			return success: false, message: "path not existed"
+		if not Content\isdir path
+			unless Path\getExt(path) in ["ts", "tsx"]
+				return success: false, message: "expecting a TypeScript file"
+			messages = []
+			content = Content\load path
+			unless content
+				return success: false, message: "failed to read file"
+			emit "AppWS", "Send", json.dump name: "UpdateTSCode", file: path, :content
+			if "d" ~= Path\getExt Path\getName path
+				done = false
+				with Node!
+					\gslot "AppWS", (eventType, msg) ->
+						if eventType == "Receive"
+							\removeFromParent!
+							if res := json.load msg
+								if res.name == "TranspileTS"
+									if res.success
+										luaFile = Path\replaceExt path, "lua"
+										Content\save luaFile, res.luaCode
+										messages[] = success: true, file: path
+									else
+										messages[] = success: false, file: path, message: res.message
+									done = true
+				emit "AppWS", "Send", json.dump name: "TranspileTS", file: path, :content
+				wait -> done
+			return success: true, :messages
+		else
+			files = Content\getAllFiles path
+			fileData = {}
+			messages = []
+			for f in *files
+				continue unless Path\getExt(f) in ["ts", "tsx"]
+				file = Path path, f
+				if content := Content\load file
+					fileData[file] = content
+					emit "AppWS", "Send", json.dump name: "UpdateTSCode", :file, :content
+				else
+					messages[] = success: false, :file, message: "failed to read file"
+			for file, content in pairs fileData
+				continue if "d" == Path\getExt Path\getName file
+				done = false
+				with Node!
+					\gslot "AppWS", (eventType, msg) ->
+						if eventType == "Receive"
+							\removeFromParent!
+							if res := json.load msg
+								if res.name == "TranspileTS"
+									if res.success
+										luaFile = Path\replaceExt file, "lua"
+										Content\save luaFile, res.luaCode
+										messages[] = success: true, :file
+									else
+										messages[] = success: false, :file, message: res.message
+									done = true
+				emit "AppWS", "Send", json.dump name: "TranspileTS", :file, :content
+				wait -> done
+			return success: true, :messages
+
+status = {}
+export default status
+
+thread ->
+	doraWeb = Path Content.assetPath, "www", "index.html"
+	doraReady = Path Content.appPath, ".www", "dora-ready"
+	if Content\exist doraWeb
+		needReload = if Content\exist doraReady
+			App.version ~= Content\load doraReady
+		else true
+		if needReload
+			Content\remove Path Content.appPath, ".www"
+			Content\copyAsync(
+				Path Content.assetPath, "www"
+				Path Content.appPath, ".www"
+			)
+			Content\save doraReady, App.version
+			print "Dora Dora is ready!"
+	if HttpServer\start 8866
+		:localIP = HttpServer
+		localIP = "localhost" if localIP == ""
+		status.url = "http://#{localIP}:8866"
+		HttpServer\startWS 8868
+	else
+		status.url = nil
+		print "8866 Port not available!"

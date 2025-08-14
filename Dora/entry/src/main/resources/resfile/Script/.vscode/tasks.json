@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"command": "../../Projects/macOS/build/Debug/Dora.app/Contents/MacOS/Dora --asset ../../Assets",
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"label": "Dora",
+			"problemMatcher": []
+		}
+	]
+}
