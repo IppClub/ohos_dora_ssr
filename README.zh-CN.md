@@ -1,10 +1,12 @@
 # Dora SSR - 鸿蒙系统移植版
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![HarmonyOS](https://img.shields.io/badge/HarmonyOS-4.0+-orange.svg)](https://developer.harmonyos.com/)
 [![xmake](https://img.shields.io/badge/build-xmake-green.svg)](https://xmake.io/)
 
 这是 **Dora SSR** 开源游戏引擎（[dora-ssr.net](https://dora-ssr.net)）的 **鸿蒙系统（OpenHarmony）移植版**。本项目将 Dora SSR 引擎适配到鸿蒙系统，为鸿蒙生态提供一套不同的原生游戏开发平台。
+
+![game](Showcase/game.png)
 
 ## 关于 Dora SSR
 
@@ -14,6 +16,10 @@ Dora SSR 是一个高性能的游戏引擎，提供以下功能：
 - **内置物理引擎**
 - **音频和输入管理**
 - **现代 C++ 架构**
+- **多语言脚本支持**：包括 Lua、YueScript、TypeScript 等
+- **内置 Web IDE**：支持在浏览器完成实时编码和游戏测试
+
+![game](Showcase/web-ide.png)
 
 ## 特性
 

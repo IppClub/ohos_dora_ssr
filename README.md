@@ -1,10 +1,12 @@
 # Dora SSR - HarmonyOS Port
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![HarmonyOS](https://img.shields.io/badge/HarmonyOS-4.0+-orange.svg)](https://developer.harmonyos.com/)
 [![xmake](https://img.shields.io/badge/build-xmake-green.svg)](https://xmake.io/)
 
 This is the **HarmonyOS (OpenHarmony) port** of the **Dora SSR** open-source game engine ([dora-ssr.net](https://dora-ssr.net)). This project adapts the Dora SSR engine to run natively on HarmonyOS devices, providing a different game development platform for the HarmonyOS ecosystem.
+
+![game](Showcase/game.png)
 
 ## About Dora SSR
 
@@ -14,6 +16,10 @@ Dora SSR is a high-performance game engine that provides:
 - **Built-in physics engine**
 - **Audio and input management**
 - **Modern C++ architecture**
+- **Multi-language scripting support** including Lua, YueScript, TypeScript, and more
+- **Built-in Web IDE** for remote real-time coding and testing in browser
+
+![game](Showcase/web-ide.png)
 
 ## Features
 
