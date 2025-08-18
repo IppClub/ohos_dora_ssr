@@ -1,5 +1,7 @@
 # Dora SSR - HarmonyOS Port
 
+#### English  | [中文](README.zh-CN.md)
+
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![HarmonyOS](https://img.shields.io/badge/HarmonyOS-4.0+-orange.svg)](https://developer.harmonyos.com/)
 [![xmake](https://img.shields.io/badge/build-xmake-green.svg)](https://xmake.io/)

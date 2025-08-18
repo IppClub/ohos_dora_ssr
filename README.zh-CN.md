@@ -1,5 +1,7 @@
 # Dora SSR - 鸿蒙系统移植版
 
+#### [English](README.md)  | 中文
+
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![HarmonyOS](https://img.shields.io/badge/HarmonyOS-4.0+-orange.svg)](https://developer.harmonyos.com/)
 [![xmake](https://img.shields.io/badge/build-xmake-green.svg)](https://xmake.io/)
