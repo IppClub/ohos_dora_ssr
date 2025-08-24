@@ -5,20 +5,20 @@ set_languages("cxx17")
 target("bgfx")
 	set_kind("static")
 
-	 -- 通用编译参数（对应 -Wall -Wextra -ffast-math -fomit-frame-pointer 等）
+	-- 通用编译参数（对应 -Wall -Wextra -ffast-math -fomit-frame-pointer 等）
 	add_cxflags("-Wall", "-Wextra", "-ffast-math", "-fomit-frame-pointer",
 				"-Wshadow", "-Wunused-value", "-Wundef")
 	add_cflags("-MMD", "-MP")   -- 生成依赖文件，等价 -MMD -MP
 	add_cxxflags("-fno-rtti", "-fno-exceptions", "-fPIC")
-	 add_defines("BGFX_CONFIG_RENDERER_OPENGLES=30")
-	 add_defines("BGFX_CONFIG_RENDERER_OPENGLES_MIN_VERSION=30")
+	add_defines("BGFX_CONFIG_RENDERER_OPENGLES=30")
+	add_defines("BGFX_CONFIG_RENDERER_OPENGLES_MIN_VERSION=30")
 
 	-- Debug / Release 宏与优化
 	if is_mode("debug") then
 		add_defines("__STDC_LIMIT_MACROS", "__STDC_FORMAT_MACROS", "__STDC_CONSTANT_MACROS",
 					"_DEBUG", "BX_CONFIG_DEBUG=1")
 		add_cxflags("-g")
-		  
+
 	else
 		add_defines("__STDC_LIMIT_MACROS", "__STDC_FORMAT_MACROS", "__STDC_CONSTANT_MACROS",
 					"NDEBUG", "BX_CONFIG_DEBUG=0")
@@ -64,6 +64,3 @@ target("bgfx")
 		"src/topology.cpp",
 		"src/vertexlayout.cpp"
 	)
-
-
-
