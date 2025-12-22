@@ -33,7 +33,7 @@ public:
 	bool move(String src, String dst);
 	bool remove(String filename);
 	bool save(String filename, String content);
-	bool save(String filename, uint8_t* content, int64_t size);
+	bool save(String filename, const uint8_t* content, int64_t size);
 	bool createFolder(String path);
 	std::list<std::string> getDirs(String path);
 	std::list<std::string> getFiles(String path);
@@ -56,6 +56,7 @@ public:
 	void loadAsyncUnsafe(String filename, const std::function<void(uint8_t*, int64_t)>& callback);
 	uint8_t* loadInMainUnsafe(String filename, int64_t& size);
 	uint8_t* loadUnsafe(String filename, int64_t& size);
+	std::string loadUnsafe(String filename);
 
 protected:
 	Content();

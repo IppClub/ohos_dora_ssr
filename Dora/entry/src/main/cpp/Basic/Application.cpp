@@ -29,8 +29,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 #include <ctime>
 #include <thread>
 
-#define DORA_VERSION "1.7.0"_slice
-#define DORA_REVISION "5"_slice
+#define DORA_VERSION "1.7.4"_slice
+#define DORA_REVISION "2"_slice
 
 #if BX_PLATFORM_ANDROID
 extern "C" {
@@ -69,6 +69,7 @@ Application::Application()
 	, _logicRunning(true)
 	, _fullScreen(false)
 	, _alwaysOnTop(true)
+	, _devMode(false)
 	, _frame(0)
 	, _visualWidth(1280)
 	, _visualHeight(720)
@@ -84,9 +85,8 @@ Application::Application()
 	, _frequency(double(bx::getHPFrequency()))
 	, _sdlWindow(nullptr)
 	, _themeColor(0xfffac03d)
-	, _winPosition{s_cast<float>(SDL_WINDOWPOS_CENTERED), s_cast<float>(SDL_WINDOWPOS_CENTERED)}
-	, _platformData{}
-    , _bgfxInited(false) {
+	, _winPosition{-1.0f, -1.0f}
+	, _platformData{} {
 	_lastTime = bx::getHPCounter() / _frequency;
 #if !BX_PLATFORM_LINUX
 	_locale = "zh-Hans"s;
@@ -186,9 +186,7 @@ void Application::setWinSize(Size var) {
 		SDL_SetWindowSize(_sdlWindow, s_cast<int>(var.width), s_cast<int>(var.height));
 		SDL_SetWindowPosition(_sdlWindow, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 	});
-	_winPosition = {-1.0f, -1.0f};
 	_fullScreen = false;
-	Event::send("AppChange"_slice, "Position"s);
 	Event::send("AppChange"_slice, "FullScreen"s);
 }
 
@@ -266,8 +264,17 @@ bool Application::isAlwaysOnTop() const noexcept {
 	return _alwaysOnTop;
 }
 
+void Application::setDevMode(bool var) {
+	_devMode = var;
+}
+
+bool Application::isDevMode() const noexcept {
+	return _devMode;
+}
+
 // This function runs in main (render) thread, and do render work
-int Application::run() {
+int Application::run(MainFunc mainFunc) {
+	_mainFunc = mainFunc;
 	Application::setSeed(s_cast<uint32_t>(std::time(nullptr)));
 
 	if (SDL_Init(SDL_INIT_EVENTS) != 0) {
@@ -296,7 +303,7 @@ int Application::run() {
 		Error("SDL failed to create window! {}", SDL_GetError());
 		return 1;
 	}
-    
+
 #if BX_PLATFORM_WINDOWS || BX_PLATFORM_OSX || BX_PLATFORM_LINUX
 	int displayIndex = SDL_GetWindowDisplayIndex(_sdlWindow);
 	SDL_Rect rect;
@@ -307,32 +314,31 @@ int Application::run() {
 	}
 #endif // BX_PLATFORM
 
+	Application::setupSdlWindow();
+
 	// call this function here to disable default render threads creation of bgfx
 	bgfx::renderFrame();
 
-	Application::setupSdlWindow();
-    
 	// start running logic thread
 	_logicThread.init(Application::mainLogic, this);
-    
+
 	SDL_Event event;
 	while (_renderRunning) {
-        
-        // do render staff and swap buffers
-        bgfx::renderFrame();
+		// do render staff and swap buffers
+		bgfx::renderFrame();
 
 		// handle SDL event in this main thread only
 		while (SDL_PollEvent(&event)) {
 			switch (event.type) {
 				case SDL_QUIT:
-//#ifdef NDEBUG
 					if (Singleton<DB>::isInitialized()) {
 						SharedDB.stop();
 					}
+#if defined(NDEBUG) && !defined(DORA_AS_LIB)
 					std::_Exit(EXIT_SUCCESS);
-//#else
-//					_renderRunning = false;
-//#endif
+#else
+					_renderRunning = false;
+#endif
 					break;
 #if BX_PLATFORM_ANDROID
 				case SDL_APP_DIDENTERFOREGROUND: {
@@ -347,9 +353,6 @@ int Application::run() {
 #endif // BX_PLATFORM_ANDROID
 				case SDL_WINDOWEVENT: {
 					switch (event.window.event) {
-                        case SDL_WINDOWEVENT_SHOWN:
-                            //appeared = true;
-                            break;
 						case SDL_WINDOWEVENT_RESIZED:
 						case SDL_WINDOWEVENT_SIZE_CHANGED: {
 #if BX_PLATFORM_ANDROID
@@ -372,7 +375,7 @@ int Application::run() {
 				}
 #if BX_PLATFORM_ANDROID || BX_PLATFORM_IOS
 				case SDL_TEXTEDITING: {
-					event.edit.start = utf8_count_characters(event.edit.text);
+					event.edit.start = CodeCvt::utf8_count_characters(event.edit.text);
 					break;
 				}
 #endif // BX_PLATFORM_ANDROID || BX_PLATFORM_IOS
@@ -516,6 +519,10 @@ void Application::makeTimeNow() {
 }
 
 void Application::shutdown() {
+	if (_devMode) {
+		Event::send("AppEvent"sv, "Shutdown"s);
+		return;
+	}
 	switch (Switch::hash(getPlatform())) {
 		case "Windows"_hash:
 		case "macOS"_hash:
@@ -540,23 +547,34 @@ int Application::mainLogic(Application* app) {
 		Error("bgfx failed to initialize!");
 		return 1;
 	}
-    
+
 	SharedPoolManager.push();
 	if (!SharedDirector.init()) {
 		Error("Director failed to initialize!");
 		return 1;
 	}
-    
+
+	if (app->_mainFunc) {
+		if (!app->_mainFunc()) {
+			Error("Failed to start main!");
+			return 1;
+		}
+	}
+
+#if BX_PLATFORM_OSX || BX_PLATFORM_WINDOWS || BX_PLATFORM_LINUX
+	for (int i = 0; i < 3; i++) {
+		app->_frame = bgfx::frame();
+	}
+	app->invokeInRender([app]() {
+		SDL_ShowWindow(app->_sdlWindow);
+	});
+#else
 	app->_frame = bgfx::frame();
+#endif
 
 	app->makeTimeNow();
 	app->_startTime = app->_lastTime;
 
-#if BX_PLATFORM_OSX || BX_PLATFORM_WINDOWS || BX_PLATFORM_LINUX
-	app->invokeInRender([app]() {
-		SDL_ShowWindow(app->_sdlWindow);
-	});
-#endif
 	SharedPoolManager.pop();
 
 	while (app->_logicRunning) {
@@ -629,7 +647,11 @@ int Application::mainLogic(Application* app) {
 		app->makeTimeNow();
 	}
 
+#ifdef DORA_AS_LIB
+	bgfx::shutdown();
+#else // DORA_AS_LIB
 	Life::destroy("BGFXDora"_slice);
+#endif // DORA_AS_LIB
 	return 0;
 }
 
@@ -728,7 +750,7 @@ void Application::openURL(String url) {
 }
 
 void Application::install(String path) {
-#if BX_PLATFORM_WINDOWS
+#if BX_PLATFORM_WINDOWS && !defined(DORA_AS_LIB)
 	AssertUnless(SharedContent.isAbsolutePath(path), "expecting an absolute path");
 	auto assetPath = SharedContent.getAssetPath();
 	auto appPath = path.toString();
@@ -788,6 +810,7 @@ void Application::install(String path) {
 		CloseHandle(pi.hProcess);
 		CloseHandle(pi.hThread);
 	}
+	Application::setDevMode(false);
 	Application::shutdown();
 #else
 	Error("Application.install() is not unsupported on this platform");
@@ -825,15 +848,16 @@ NS_DORA_END
 
 // Entry functions needed by SDL2
 #if BX_PLATFORM_OSX || BX_PLATFORM_ANDROID || BX_PLATFORM_IOS || BX_PLATFORM_LINUX
+#ifndef DORA_AS_LIB
 extern "C" int main(int argc, char* argv[]) {
 	return SharedApplication.run();
 }
+#endif // !DORA_AS_LIB
 #endif // BX_PLATFORM_OSX || BX_PLATFORM_ANDROID || BX_PLATFORM_IOS || BX_PLATFORM_LINUX
 
 #if BX_PLATFORM_WINDOWS
 
 #if DORA_WIN_CONSOLE
-
 #include "Common/Async.h"
 
 NS_DORA_BEGIN
@@ -859,6 +883,7 @@ public:
 NS_DORA_END
 #endif // DORA_WIN_CONSOLE
 
+#ifndef DORA_AS_LIB
 int CALLBACK WinMain(
 	_In_ HINSTANCE hInstance,
 	_In_ HINSTANCE hPrevInstance,
@@ -869,7 +894,15 @@ int CALLBACK WinMain(
 #endif
 	return SharedApplication.run();
 }
+#endif // !DORA_AS_LIB
+
 #endif // BX_PLATFORM_WINDOWS
+
+#ifdef DORA_AS_LIB
+extern "C" DORA_EXPORT int dora_run(MainFunc mainFunc) {
+	return SharedApplication.run(mainFunc);
+}
+#endif // DORA_AS_LIB
 
 #include "Http/HttpServer.h"
 #include "Lua/LuaEngine.h"

@@ -59,6 +59,7 @@ interface RepoInfo {
 		en: string;
 	};
 	categories?: string[];
+	exe?: boolean | string[];
 }
 
 const windowsNoScrollFlags = [
@@ -95,6 +96,14 @@ const themeColor = App.themeColor;
 
 const sep = () => ImGui.SeparatorText("");
 const thinSep = () => ImGui.PushStyleVar(ImGui.StyleVarNum.SeparatorTextBorderSize, 1, sep);
+
+const run = (fileName: string) => {
+	const Entry = require("Script.Dev.Entry");
+	Entry.allClear();
+	thread(() => {
+		Entry.enterEntryAsync({entryName: "Project", fileName});
+	});
+};
 
 class ResourceDownloader {
 	private packages: PackageInfo[] = [];
@@ -142,10 +151,10 @@ class ResourceDownloader {
 			const versionResponse = HttpClient.getAsync(`${config.url}/api/v1/package-list-version`);
 			const packageListVersionFile = Path(Content.appPath, ".cache", "preview", "package-list-version.json");
 			if (versionResponse) {
-				const [version] = json.load(versionResponse);
+				const [version] = json.decode(versionResponse);
 				const packageListVersion = version as PackageListVersion;
 				if (Content.exist(packageListVersionFile)) {
-					const [oldVersion] = json.load(Content.load(packageListVersionFile));
+					const [oldVersion] = json.decode(Content.load(packageListVersionFile));
 					const oldPackageListVersion = oldVersion as PackageListVersion;
 					if (packageListVersion.version !== oldPackageListVersion.version) {
 						reload = true;
@@ -171,13 +180,13 @@ class ResourceDownloader {
 			}
 			const packagesFile = Path(cachePath, "packages.json");
 			if (Content.exist(packagesFile)) {
-				const [packages] = json.load(Content.load(packagesFile));
+				const [packages] = json.decode(Content.load(packagesFile));
 				this.packages = packages as PackageInfo[];
 			} else {
 				const packagesResponse = HttpClient.getAsync(`${config.url}/api/v1/packages`);
 				if (packagesResponse) {
 					// Cache packages data
-					const [packages] = json.load(packagesResponse);
+					const [packages] = json.decode(packagesResponse);
 					this.packages = packages as PackageInfo[];
 					Content.save(packagesFile, packagesResponse);
 				}
@@ -203,12 +212,12 @@ class ResourceDownloader {
 			};
 			const reposFile = Path(cachePath, "repos.json");
 			if (Content.exist(reposFile)) {
-				const [repos] = json.load(Content.load(reposFile));
+				const [repos] = json.decode(Content.load(reposFile));
 				loadRepos(repos as RepoInfo[]);
 			} else {
 				const reposResponse = HttpClient.getAsync(`${config.url}/assets/repos.json`);
 				if (reposResponse) {
-					const [repos] = json.load(reposResponse);
+					const [repos] = json.decode(reposResponse);
 					loadRepos(repos as RepoInfo[]);
 					Content.save(reposFile, reposResponse);
 				}
@@ -223,6 +232,8 @@ class ResourceDownloader {
 				if (Content.exist(downloadPath)) {
 					this.downloadedPackages.add(pkg.name);
 				}
+			}
+			for (const pkg of this.packages) {
 				this.loadPreviewImage(pkg.name);
 			}
 			this.isLoading = false;
@@ -294,6 +305,19 @@ class ResourceDownloader {
 				if (Content.unzipAsync(targetFile, unzipPath)) {
 					Content.remove(targetFile);
 					this.downloadedPackages.add(pkg.name);
+					const repo = this.repos.get(pkg.name);
+					if (repo) {
+						const [str] = json.encode(repo);
+						if (str) {
+							if (Content.mkdir(Path(unzipPath, ".dora"))) {
+								Content.save(Path(unzipPath, ".dora", "repo.json"), str);
+								const previewFile = this.previewFiles.get(pkg.name);
+								if (previewFile && Content.exist(previewFile)) {
+									Content.copy(previewFile, Path(unzipPath, ".dora", "banner.jpg"));
+								}
+							}
+						}
+					}
 					Director.postNode.emit("UpdateEntries");
 				} else {
 					Content.remove(unzipPath);
@@ -410,13 +434,15 @@ class ResourceDownloader {
 					}
 				}
 
+				const title = repo.title[zh ? "zh" : "en"];
+
 				if (this.filterText !== '') {
-					const [res] = string.match(repo.name.toLowerCase(), this.filterText);
+					const [res] = string.match(title.toLowerCase(), this.filterText);
 					if (!res) continue;
 				}
 
 				// Title
-				ImGui.TextColored(themeColor, repo.title[zh ? "zh" : "en"]);
+				ImGui.TextColored(themeColor, title);
 
 				// Preview image
 				const previewTexture = this.previewTextures.get(pkg.name);
@@ -459,11 +485,16 @@ class ResourceDownloader {
 					ImGui.Text(dateStr);
 				}
 
+				// Package info
+				ImGui.TextColored(themeColor, zh ? `文件大小：` : `File Size:`);
+				ImGui.SameLine();
+				ImGui.Text(`${(version.size / 1024 / 1024).toFixed(2)} MB`);
+
 				// Progress bar
 				const progress = this.downloadProgress.get(pkg.name);
 				if (progress !== undefined) {
 					ImGui.ProgressBar(progress.progress, Vec2(-1, 30));
-						ImGui.BeginDisabled(() => {
+					ImGui.BeginDisabled(() => {
 						ImGui.Button(progress.status);
 					});
 				}
@@ -471,12 +502,18 @@ class ResourceDownloader {
 				// Download button
 				if (progress === undefined) {
 					const isDownloaded = this.isDownloaded(pkg.name);
+					const exeText = (zh ? "测试" : "Test") + `##test-${pkg.name}`;
 					const buttonText = (isDownloaded ?
 						(zh ? "重新下载" : "Re-Download") :
 						(zh ? "下载" : "Download")) + `##download-${pkg.name}`;
 					const deleteText = (zh ? "删除" : "Delete") + `##delete-${pkg.name}`;
+					const runable = repo.exe !== false;
 					if (this.isDownloading) {
 						ImGui.BeginDisabled(() => {
+							if (runable) {
+								ImGui.Button(exeText);
+								ImGui.SameLine();
+							}
 							ImGui.Button(buttonText);
 							if (isDownloaded) {
 								ImGui.SameLine();
@@ -484,6 +521,27 @@ class ResourceDownloader {
 							}
 						});
 					} else {
+						if (isDownloaded && runable) {
+							if (typeof repo.exe === 'object') {
+								const exeList = repo.exe;
+								const popupId = `select-${pkg.name}`;
+								if (ImGui.Button(exeText)) {
+									ImGui.OpenPopup(popupId);
+								}
+								ImGui.BeginPopup(popupId, () => {
+									for (const entry of exeList) {
+										if (ImGui.Selectable(`${entry}##run-${pkg.name}-${entry}`)) {
+											run(Path(Content.writablePath, "Download", pkg.name, entry, "init"));
+										}
+									}
+								});
+							} else {
+								if (ImGui.Button(exeText)) {
+									run(Path(Content.writablePath, "Download", pkg.name, "init"));
+								}
+							}
+							ImGui.SameLine();
+						}
 						if (ImGui.Button(buttonText)) {
 							this.downloadPackage(pkg);
 						}
@@ -498,9 +556,6 @@ class ResourceDownloader {
 					}
 				}
 
-				// Package info
-				ImGui.SameLine();
-				ImGui.Text(`${(version.size / 1024 / 1024).toFixed(2)} MB`);
 				if (!this.isDownloading && pkg.versionNames && pkg.currentVersion) {
 					ImGui.SameLine();
 					ImGui.SetNextItemWidth(-20);

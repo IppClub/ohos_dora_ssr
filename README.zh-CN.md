@@ -3,7 +3,7 @@
 #### [English](README.md)  | 中文
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-4.0+-orange.svg)](https://developer.harmonyos.com/)
+[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-5.0+-orange.svg)](https://developer.harmonyos.com/)
 [![xmake](https://img.shields.io/badge/build-xmake-green.svg)](https://xmake.io/)
 
 这是 **Dora SSR** 开源游戏引擎（[dora-ssr.net](https://dora-ssr.net)）的 **鸿蒙系统（OpenHarmony）移植版**。本项目将 Dora SSR 引擎适配到鸿蒙系统，为鸿蒙生态提供一套不同的原生游戏开发平台。
@@ -25,7 +25,7 @@ Dora SSR 是一个高性能的游戏引擎，提供以下功能：
 
 ## 特性
 
-- **原生鸿蒙支持**：完全适配鸿蒙系统 4.0+ 设备
+- **原生鸿蒙支持**：完全适配鸿蒙系统 5.0+ 设备
 - **BGFX 图形引擎**：高性能跨平台渲染
 - **SDL2 集成**：适配鸿蒙系统的 SDL2 输入和窗口管理
 - **多架构支持**：支持 ARM64 和 x86_64
@@ -44,7 +44,7 @@ Dora SSR 是一个高性能的游戏引擎，提供以下功能：
    - 从 [鸿蒙开发者门户](https://developer.harmonyos.com/) 下载
 
 3. **鸿蒙 SDK**
-   - API 11+（鸿蒙系统 4.1.0+）
+   - API 19+（鸿蒙系统 5.0.0+）
    - 在 DevEco Studio 中配置
 
 ## 安装和配置

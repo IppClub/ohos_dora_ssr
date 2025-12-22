@@ -3,7 +3,7 @@
 #### English  | [中文](README.zh-CN.md)
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-4.0+-orange.svg)](https://developer.harmonyos.com/)
+[![HarmonyOS](https://img.shields.io/badge/HarmonyOS-5.0+-orange.svg)](https://developer.harmonyos.com/)
 [![xmake](https://img.shields.io/badge/build-xmake-green.svg)](https://xmake.io/)
 
 This is the **HarmonyOS (OpenHarmony) port** of the **Dora SSR** open-source game engine ([dora-ssr.net](https://dora-ssr.net)). This project adapts the Dora SSR engine to run natively on HarmonyOS devices, providing a different game development platform for the HarmonyOS ecosystem.
@@ -25,7 +25,7 @@ Dora SSR is a high-performance game engine that provides:
 
 ## Features
 
-- **Native HarmonyOS Support**: Fully adapted for HarmonyOS 4.0+ devices
+- **Native HarmonyOS Support**: Fully adapted for HarmonyOS 5.0+ devices
 - **BGFX Graphics Engine**: High-performance cross-platform rendering
 - **SDL2 Integration**: Adapted SDL2 for HarmonyOS input and window management
 - **Multi-architecture Support**: ARM64 and x86_64 support
@@ -44,7 +44,7 @@ Dora SSR is a high-performance game engine that provides:
    - Download from [HarmonyOS Developer Portal](https://developer.harmonyos.com/)
 
 3. **HarmonyOS SDK**
-   - API 11+ (HarmonyOS 4.1.0+)
+   - API 19+ (HarmonyOS 5.0.0+)
    - Configured in DevEco Studio
 
 ## Installation & Setup

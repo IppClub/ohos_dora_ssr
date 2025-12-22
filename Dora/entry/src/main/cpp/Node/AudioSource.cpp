@@ -128,14 +128,14 @@ void AudioSource::visit() {
 
 void AudioSource::cleanup() {
 	if (_flags.isOff(Node::Cleanup)) {
+		Node::cleanup();
 		_bus = nullptr;
 		_handle = 0;
-		Node::cleanup();
 	}
 }
 
 bool AudioSource::playBackground() {
-	AssertUnless(_flags.isOn(Node::Cleanup), "can not operate on an invalid AudioSource");
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid AudioSource");
 	if (_handle != 0 && SharedAudio.isVoicePlaying(_handle)) {
 		return false;
 	}
@@ -169,7 +169,7 @@ bool AudioSource::playBackground() {
 }
 
 bool AudioSource::play(double delayTime) {
-	AssertUnless(_flags.isOn(Node::Cleanup), "can not operate on an invalid AudioSource");
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid AudioSource");
 	if (_handle != 0 && SharedAudio.isVoicePlaying(_handle)) {
 		return false;
 	}
@@ -207,7 +207,7 @@ bool AudioSource::play(double delayTime) {
 }
 
 bool AudioSource::play3D(double delayTime) {
-	AssertUnless(_flags.isOn(Node::Cleanup), "can not operate on an invalid AudioSource");
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid AudioSource");
 	if (_handle != 0 && SharedAudio.isVoicePlaying(_handle)) {
 		return false;
 	}

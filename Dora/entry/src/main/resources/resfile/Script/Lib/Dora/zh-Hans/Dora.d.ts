@@ -431,18 +431,12 @@ export namespace Color3 {
 /** 用于创建Color3对象的类。 */
 interface Color3Class {
 	/**
-	 * 创建所有通道都设置为0的颜色。
-	 * @returns 新的`Color3`对象。
-	 */
-	(this: void): Color3;
-
-	/**
 	 * 从RGB整数值创建新的`Color3`对象。
-	 * @param rgb 用于创建颜色的RGB整数值。
+	 * @param rgb [可选] 用于创建颜色的RGB整数值。默认值为 0。
 	 * 例如 0xffffff（白色），0xff0000（红色）。
 	 * @returns 新的`Color3`对象。
 	 */
-	(this: void, rgb: number): Color3;
+	(this: void, rgb?: number): Color3;
 
 	/**
 	 * 从RGB颜色通道值创建新的`Color3`对象。
@@ -503,12 +497,6 @@ export namespace Color {
  */
 interface ColorClass {
 	/**
-	 * 创建所有通道都设置为0的颜色。
-	 * @returns 新的Color对象。
-	 */
-	(this: void): Color;
-
-	/**
 	 * 使用Color3对象和alpha值创建新的Color对象。
 	 * @param color 作为Color3对象的颜色。
 	 * @param a [可选] 颜色的alpha值，范围从0到255。
@@ -518,11 +506,18 @@ interface ColorClass {
 
 	/**
 	 * 从ARGB整数值创建新的`Color`对象。
-	 * @param argb 用于创建颜色的ARGB整数值。
+	 * @param argb [可选] 用于创建颜色的ARGB整数值。默认值为 0。
 	 * 例如 0xffffffff（不透明的白色），0x88ff0000（半透明的红色）
 	 * @returns 新的`Color`对象。
 	 */
-	(this: void, argb: number): Color;
+	(this: void, argb?: number): Color;
+
+	/**
+	 * 从RGBA字符串创建新的`Color`对象。
+	 * @param rgba 用于创建颜色的 RGBA 字符串，格式为"#RRGGBBAA"。
+	 * @returns 新的`Color`对象。
+	 */
+	(this: void, rgba: string): Color;
 
 	/**
 	 * 从RGBA颜色通道值创建新的`Color`对象。
@@ -661,6 +656,12 @@ interface App {
 	alwayOnTop: boolean;
 
 	/**
+	 * 游戏引擎是否运行在开发模式下。
+	 * 在开发模式下 `App:shutdown()` 函数会发出一个 "AppEvent" 全局事件，类型为 "Shutdown"，而不是关闭游戏引擎。
+	 */
+	devMode: boolean;
+
+	/**
 	 * 应用程序窗口大小。
 	 * 由于显示设备的DPI不同，可能会与实际的可视大小有差异。
 	 * 在Android和iOS平台上无法设置此属性。
@@ -707,8 +708,9 @@ interface App {
 	openFileDialog(folderOnly: boolean, callback: (path: string) => void): void;
 
 	/**
-	 * 关闭游戏引擎。
-	 * 该函数在Android和iOS平台不会生效，以遵循移动平台上应用程序规范。
+	 * 关闭并退出游戏引擎。
+	 * 当 `devMode` 设置为 true 时，该函数只会发出一个 "AppEvent" 全局事件，类型为 "Shutdown"，而不是关闭游戏引擎。
+	 * 该函数在Android和iOS平台不会真正关闭游戏引擎，以遵循移动平台上应用程序规范。
 	 */
 	shutdown(): void;
 }
@@ -1479,6 +1481,13 @@ class Audio {
 	 * @param fadeTime 淡出流式音频的时间（以秒为单位）。默认为0.0。
 	 */
 	stopStream(fadeTime?: number): void;
+
+	/**
+	 * 停止所有正在播放的音频。
+	 *
+	 * @param fadeTime 淡出音频的时间（以秒为单位）。默认为0.0。
+	 */
+	stopAll(fadeTime?: number): void;
 
 	/**
 	 * 暂停所有当前正在播放的音频。
@@ -6265,7 +6274,7 @@ class Sprite extends Node {
 	/**
 	 * 图元的纹理。
 	 */
-	texture: Texture2D;
+	readonly texture: Texture2D;
 
 	/**
 	 * U（水平）轴的纹理包裹模式。
@@ -7616,13 +7625,13 @@ interface json {
 	 * @param maxDepth 解析的最大深度（默认是 128）。
 	 * @returns 表示 JSON 数据的对象，如果文本不是有效的 JSON，则返回 null 和错误消息。
 	 */
-	load(this: void, json: string, maxDepth?: number): LuaMultiReturn<[any, null]> | LuaMultiReturn<[null, string]>;
+	decode(this: void, json: string, maxDepth?: number): LuaMultiReturn<[any, null]> | LuaMultiReturn<[null, string]>;
 	/**
 	 * 将指定的对象转换为 JSON 文本。
 	 * @param obj 要转换的对象。
 	 * @returns 表示对象的 JSON 文本，如果对象无法转换，则返回 null 和错误消息。
 	 */
-	dump(this: void, obj: object): LuaMultiReturn<[string, null]> | LuaMultiReturn<[null, string]>;
+	encode(this: void, obj: object): LuaMultiReturn<[string, null]> | LuaMultiReturn<[null, string]>;
 	/**
 	 * 表示 JSON null 值。
 	 */
@@ -7689,6 +7698,16 @@ interface Wasm {
 
 const wasm: Wasm;
 export {wasm as Wasm};
+
+/**
+ * 使用RGBA颜色通道值创建一个新的`Color`对象。
+ * @param r 红色通道值（0-255）。
+ * @param g 绿色通道值（0-255）。
+ * @param b 蓝色通道值（0-255）。
+ * @param a 透明通道值（0-1）。
+ * @returns 新的`Color`对象。
+ */
+export function rgba(this: void, r: number, g: number, b: number, a: number): Color;
 
 } // module "Dora"
 

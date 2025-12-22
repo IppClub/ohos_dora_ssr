@@ -52,6 +52,8 @@ namespace fs = std::filesystem;
 
 #include <atomic>
 
+#include "SDL.h"
+
 #if BX_PLATFORM_WINDOWS
 static std::string get_local_ip() {
 	std::string localIP;
@@ -76,7 +78,6 @@ static std::string get_local_ip() {
 	}
 	return localIP;
 }
-std::string toMBString(const std::string& utf8Str);
 #else // BX_PLATFORM_WINDOWS
 #include <ifaddrs.h>
 
@@ -303,39 +304,49 @@ bool HttpServer::start(int port) {
 	if (server.is_running()) return false;
 	server.set_default_headers({{"Access-Control-Allow-Origin"s, "*"s},
 		{"Access-Control-Allow-Headers"s, "*"s}});
-	server.set_file_request_handler([](const httplib::Request& req, httplib::Response& res) {
+	server.set_file_request_handler([this](const httplib::Request& req, httplib::Response& res) {
 		std::string path = req.path;
+		if (!httplib::detail::is_valid_path(path)) {
+			return false;
+		}
+		if (path.back() == '/') {
+			path += "index.html";
+		}
 		if (path.size() > 0 && path[0] == '/') {
 			path.erase(path.begin());
 		}
-		if (httplib::detail::is_valid_path(path)) {
-			if (!SharedContent.exist(path)) {
+		if (!SharedContent.exist(path)) {
+			bool found = false;
+			if (!_wwwPath.empty()) {
+				auto checkPath = Path::concat({_wwwPath, path});
+				if (SharedContent.exist(checkPath)) {
+					path = checkPath;
+					found = true;
+				}
+			}
+			if (!found) {
+				auto checkPath = Path::concat({SharedContent.getWritablePath(), path});
+				if (SharedContent.exist(checkPath)) {
+					path = checkPath;
+					found = true;
+				}
+			}
+			if (!found) {
 				return false;
 			}
-		} else {
-			return false;
 		}
 		auto content_type = httplib::detail::find_content_type(path, {}, "application/octet-stream"s);
 		OwnArray<uint8_t> data;
-		size_t dataSize = 0;
 		bx::Semaphore waitForLoaded;
+		std::string result;
 		SharedContent.getThread()->run([&]() {
-			int64_t size = 0;
-			auto result = SharedContent.loadUnsafe(path, size);
-			if (size > 0) {
-				data = MakeOwnArray(result);
-				dataSize = s_cast<size_t>(size);
-			}
+			result = SharedContent.loadUnsafe(path);
 			waitForLoaded.post();
 		});
 		waitForLoaded.wait();
-		if (dataSize > 0) {
-			auto sd = std::make_shared<OwnArray<uint8_t>>(std::move(data));
-			res.set_chunked_content_provider(content_type, [sd = std::move(sd), dataSize](size_t, httplib::DataSink& sink) -> bool {
-				sink.write(r_cast<const char*>((*sd).get()), dataSize);
-				sink.done();
-				return true;
-			});
+		if (!result.empty()) {
+			res.set_header("Content-Type", content_type);
+			res.body = std::move(result);
 			return true;
 		}
 		return false;
@@ -343,16 +354,15 @@ bool HttpServer::start(int port) {
 	server.Options(".*", [](const httplib::Request& req, httplib::Response& res) { });
 	bool success = server.bind_to_port("0.0.0.0", port);
 	if (success) {
-		if (!_wwwPath.empty()) {
-			server.set_mount_point("/", _wwwPath);
-		}
-		server.set_mount_point("/", SharedContent.getAppPath());
-		if (SharedContent.getWritablePath() != SharedContent.getAppPath()) {
-			server.set_mount_point("/", SharedContent.getWritablePath());
-		}
 		for (const auto& post : _posts) {
 			server.Post(post.pattern, [this, &post](const httplib::Request& req, httplib::Response& res) {
 				HttpServer::Request request;
+				request.headers.reserve(req.headers.size() * 2);
+				for (const auto& header : req.headers) {
+					request.headers.emplace_back(header.first);
+					request.headers.emplace_back(header.second);
+				}
+				request.params.reserve(req.params.size() * 2);
 				for (const auto& param : req.params) {
 					request.params.emplace_back(param.first);
 					request.params.emplace_back(param.second);
@@ -376,6 +386,12 @@ bool HttpServer::start(int port) {
 		for (const auto& post : _postScheduled) {
 			server.Post(post.pattern, [this, &post](const httplib::Request& req, httplib::Response& res) {
 				HttpServer::Request request;
+				request.headers.reserve(req.headers.size() * 2);
+				for (const auto& header : req.headers) {
+					request.headers.emplace_back(header.first);
+					request.headers.emplace_back(header.second);
+				}
+				request.params.reserve(req.params.size() * 2);
 				for (const auto& param : req.params) {
 					request.params.emplace_back(param.first);
 					request.params.emplace_back(param.second);
@@ -412,6 +428,12 @@ bool HttpServer::start(int port) {
 						return;
 					}
 					HttpServer::Request request;
+					request.headers.reserve(req.headers.size() * 2);
+					for (const auto& header : req.headers) {
+						request.headers.emplace_back(header.first);
+						request.headers.emplace_back(header.second);
+					}
+					request.params.reserve(req.params.size() * 2);
 					for (const auto& param : req.params) {
 						request.params.emplace_back(param.first);
 						request.params.emplace_back(param.second);
@@ -421,20 +443,17 @@ bool HttpServer::start(int port) {
 						request.contentType = it->second;
 					}
 					std::list<std::string> acceptedFiles;
-					std::list<std::ofstream> streams;
+					std::list<std::shared_ptr<SDL_RWops>> streams;
 					content_reader(
-						[&](const httplib::MultipartFormData& file) {
+						[&](const httplib::FormData& file) {
 							bool accepted = false;
 							bx::Semaphore waitForResponse;
 							SharedApplication.invokeInLogic([&]() {
 								if (auto newFile = postFile.acceptHandler(request, file.filename)) {
 									auto fullPath = newFile.value();
-#if BX_PLATFORM_WINDOWS
-									fullPath = toMBString(fullPath);
-#endif
-									auto& stream = streams.emplace_back(fullPath,
-										std::ios::out | std::ios::trunc | std::ios::binary);
+									SDL_RWops* stream = SDL_RWFromFile(fullPath.c_str(), "wb+");
 									if (stream) {
+										streams.push_back({stream, [](SDL_RWops* io) { SDL_RWclose(io); }});
 										accepted = true;
 										acceptedFiles.emplace_back(newFile.value());
 									}
@@ -445,8 +464,11 @@ bool HttpServer::start(int port) {
 							return accepted;
 						},
 						[&](const char* data, size_t data_length) {
-							if (streams.back().write(data, data_length)) {
-								return true;
+							if (!streams.empty()) {
+								size_t written = SDL_RWwrite(streams.back().get(), data, 1, data_length);
+								if (written == data_length) {
+									return true;
+								}
 							}
 							acceptedFiles.pop_back();
 							return false;
@@ -749,49 +771,45 @@ void HttpClient::downloadAsync(String url, String filePath, float timeout, const
 			client.set_follow_location(true);
 			client.set_connection_timeout(timeout);
 			auto fullname = fileStr;
-#if BX_PLATFORM_WINDOWS
-			fullname = toMBString(fullname);
-#endif
-			std::ofstream out(fullname, std::ios::out | std::ios::trunc | std::ios::binary);
+			SDL_RWops* out = SDL_RWFromFile(fullname.c_str(), "wb+");
 			if (!out) {
 				Error("invalid local file path \"{}\" to download to", fileStr);
 				return nullptr;
 			}
+			auto stream = std::shared_ptr<SDL_RWops>{out, [](SDL_RWops* io) { SDL_RWclose(io); }};
 			auto result = client.Get(
 				pathToGet, [&](const char* data, size_t data_length) -> bool {
 					if (SharedHttpClient.isStopped()) {
 						return false;
-					} else if (!out.write(data, data_length)) {
-						Error("failed to write downloaded file for \"{}\"", urlStr);
-						out.close();
-						SharedApplication.invokeInLogic([progressFunc]() {
-							(*progressFunc)(true, 0, 0);
-						});
-						std::error_code err;
-						fs::remove_all(fileStr, err);
-						WarnIf(err, "failed to remove download file \"{}\" due to \"{}\".", fileStr, err.message());
-						return false;
+					} else {
+						size_t written = SDL_RWwrite(out, data, 1, data_length);
+						if (written != data_length) {
+							Error("failed to write downloaded file for \"{}\"", urlStr);
+							SharedApplication.invokeInLogic([progressFunc]() {
+								(*progressFunc)(true, 0, 0);
+							});
+							std::error_code err;
+							fs::remove_all(fileStr, err);
+							WarnIf(err, "failed to remove download file \"{}\" due to \"{}\".", fileStr, err.message());
+							return false;
+						}
+						return true;
 					}
-					return true;
+					return false;
 				},
-				[&, stopped = std::make_shared<std::atomic<bool>>(false)](uint64_t current, uint64_t total) -> bool {
-					if (current == total) {
-						out.close();
-					}
+				[&, stream, stopped = std::make_shared<std::atomic<bool>>(false)](uint64_t current, uint64_t total) -> bool {
 					SharedApplication.invokeInLogic([progressFunc, current, total, stopped]() {
 						if (!*stopped) {
 							*stopped = (*progressFunc)(false, current, total);
 						}
 					});
 					if (*stopped) {
-						out.close();
 						return false;
 					}
 					return true;
 				});
 			if (!result || result.error() != httplib::Error::Success) {
 				Info("failed to download \"{}\" due to {}", urlStr, httplib::to_string(result.error()));
-				out.close();
 				SharedApplication.invokeInLogic([progressFunc]() {
 					(*progressFunc)(true, 0, 0);
 				});

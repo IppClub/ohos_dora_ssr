@@ -14,7 +14,7 @@
  */
 {
   "app": {
-    "bundleName": "com.ippclub.dorassr",
+    "bundleName": "org.ippclub.dorassr",
     "vendor": "ippclub",
     "versionCode": 1070005,
     "versionName": "1.7.0",

@@ -18,8 +18,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 #include "SQLiteCpp/SQLiteCpp.h"
 
 extern "C" {
-int colibc_json_load(lua_State* L);
-int colibc_json_dump(lua_State* L);
+int colibc_json_decode(lua_State* L);
+int colibc_json_encode(lua_State* L);
 }
 
 NS_DORA_BEGIN
@@ -754,16 +754,6 @@ tolua_lerror:
 	tolua_error(L, "#ferror in function 'DrawNode.drawVertices'.", &tolua_err);
 	return 0;
 #endif
-}
-
-/* Size */
-
-Size* Size_create(float width, float height) {
-	return Mtolua_new((Size)({width, height}));
-}
-
-Size* Size_create(const Vec2& vec) {
-	return Mtolua_new((Size)({vec.x, vec.y}));
 }
 
 /* BlendFunc */
@@ -2831,10 +2821,26 @@ int HttpServer_post(lua_State* L) {
 			int top = lua_gettop(L);
 			DEFER(lua_settop(L, top));
 			lua_createtable(L, 0, 0);
-			lua_pushliteral(L, "params");
+			lua_pushliteral(L, "headers");
 			lua_createtable(L, 0, 0);
 			std::string key;
 			bool startPair = true;
+			for (const auto& v : req.headers) {
+				if (startPair) {
+					startPair = false;
+					key = v.toString();
+				} else {
+					startPair = true;
+					tolua_pushslice(L, key);
+					tolua_pushslice(L, v);
+					lua_rawset(L, -3);
+				}
+			}
+			lua_rawset(L, -3);
+			lua_pushliteral(L, "params");
+			lua_createtable(L, 0, 0);
+			key.clear();
+			startPair = true;
 			for (const auto& v : req.params) {
 				if (startPair) {
 					startPair = false;
@@ -2849,7 +2855,7 @@ int HttpServer_post(lua_State* L) {
 			lua_rawset(L, -3);
 			lua_pushliteral(L, "body");
 			if (req.contentType == "application/json"_slice) {
-				lua_pushcfunction(L, colibc_json_load);
+				lua_pushcfunction(L, colibc_json_decode);
 				tolua_pushslice(L, req.body);
 				if (!LuaEngine::call(L, 1, 1)) {
 					lua_pop(L, 1);
@@ -2862,7 +2868,7 @@ int HttpServer_post(lua_State* L) {
 			LuaEngine::invoke(L, handler->get(), 1, 1);
 			HttpServer::Response res;
 			if (lua_istable(L, -1)) {
-				lua_pushcfunction(L, colibc_json_dump);
+				lua_pushcfunction(L, colibc_json_encode);
 				lua_insert(L, -2);
 				if (LuaEngine::call(L, 1, 1)) {
 					res.content = tolua_toslice(L, -1, nullptr).toString();
@@ -2910,10 +2916,26 @@ int HttpServer_postSchedule(lua_State* L) {
 			int top = lua_gettop(L);
 			DEFER(lua_settop(L, top));
 			lua_createtable(L, 0, 0);
-			lua_pushliteral(L, "params");
+			lua_pushliteral(L, "headers");
 			lua_createtable(L, 0, 0);
 			std::string key;
 			bool startPair = true;
+			for (const auto& v : req.headers) {
+				if (startPair) {
+					startPair = false;
+					key = v.toString();
+				} else {
+					startPair = true;
+					tolua_pushslice(L, key);
+					tolua_pushslice(L, v);
+					lua_rawset(L, -3);
+				}
+			}
+			lua_rawset(L, -3);
+			lua_pushliteral(L, "params");
+			lua_createtable(L, 0, 0);
+			key.clear();
+			startPair = true;
 			for (const auto& v : req.params) {
 				if (startPair) {
 					startPair = false;
@@ -2928,7 +2950,7 @@ int HttpServer_postSchedule(lua_State* L) {
 			lua_rawset(L, -3);
 			lua_pushliteral(L, "body");
 			if (req.contentType == "application/json"_slice) {
-				lua_pushcfunction(L, colibc_json_load);
+				lua_pushcfunction(L, colibc_json_decode);
 				tolua_pushslice(L, req.body);
 				if (!LuaEngine::call(L, 1, 1)) {
 					lua_pop(L, 1);
@@ -2956,7 +2978,7 @@ int HttpServer_postSchedule(lua_State* L) {
 				} else {
 					HttpServer::Response res;
 					if (lua_istable(L, -1)) {
-						lua_pushcfunction(L, colibc_json_dump);
+						lua_pushcfunction(L, colibc_json_encode);
 						lua_insert(L, -2);
 						if (LuaEngine::call(L, 1, 1)) {
 							res.content = tolua_toslice(L, -1, nullptr).toString();

@@ -39,7 +39,7 @@ local function getLatestVersion() -- 47
 		local res = HttpClient:getAsync(url) -- 52
 		local success = false -- 53
 		if res then -- 53
-			local info = (json.load(res)) -- 55
+			local info = (json.decode(res)) -- 55
 			if info then -- 55
 				latestVersion = info.tag_name -- 57
 				success = true -- 58
@@ -92,7 +92,11 @@ local unzipDone = false -- 97
 local function download() -- 99
 	thread(function() -- 100
 		progress = 0 -- 101
-		local url, filename = table.unpack(getDownloadURL()) -- 102
+		local url, filename = table.unpack( -- 102
+			getDownloadURL(), -- 102
+			1, -- 102
+			2 -- 102
+		) -- 102
 		local targetFile = Path(Content.writablePath, ".download", filename) -- 103
 		downloadTargetFile = targetFile -- 104
 		Content:mkdir(Path(Content.writablePath, ".download")) -- 105

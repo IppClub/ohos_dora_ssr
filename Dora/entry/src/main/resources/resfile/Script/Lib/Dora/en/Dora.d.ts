@@ -431,18 +431,12 @@ export namespace Color3 {
 /** A class for creating Color3 objects. */
 interface Color3Class {
 	/**
-	 * Creates a color with all channels set to 0.
-	 * @returns A new `Color3` object.
-	 */
-	(this: void): Color3;
-
-	/**
 	 * Creates a new `Color3` object from an RGB integer value.
-	 * @param rgb The RGB integer value to create the color from.
+	 * @param rgb [optional] The RGB integer value to create the color from. Default is 0.
 	 * For example 0xffffff (white), 0xff0000 (red).
 	 * @returns A new `Color3` object.
 	 */
-	(this: void, rgb: number): Color3;
+	(this: void, rgb?: number): Color3;
 
 	/**
 	 * Creates a new `Color3` object from RGB color channel values.
@@ -503,12 +497,6 @@ export namespace Color {
  */
 interface ColorClass {
 	/**
-	 * Creates a color with all channels set to 0.
-	 * @returns A new Color object.
-	 */
-	(this: void): Color;
-
-	/**
 	 * Creates a new Color object with a Color3 object and alpha value.
 	 * @param color The color as a Color3 object.
 	 * @param a [optional] The alpha value of the color ranging from 0 to 255.
@@ -518,11 +506,18 @@ interface ColorClass {
 
 	/**
 	 * Creates a new `Color` object from an ARGB integer value.
-	 * @param argb The ARGB integer value to create the color from.
+	 * @param argb [optional] The ARGB integer value to create the color from. Default is 0.
 	 * For example 0xffffffff (opaque white), 0x88ff0000 (half transparent red)
 	 * @returns A new `Color` object.
 	 */
-	(this: void, argb: number): Color;
+	(this: void, argb?: number): Color;
+
+	/**
+	 * Creates a new `Color` object from a RGBA string.
+	 * @param rgba The RGBA string to create the color from, format like "#RRGGBBAA".
+	 * @returns A new `Color` object.
+	 */
+	(this: void, rgba: string): Color;
 
 	/**
 	 * Creates a new `Color` object from RGBA color channel values.
@@ -657,6 +652,12 @@ interface App {
 	alwayOnTop: boolean;
 
 	/**
+	 * Whether the game engine is running in development mode.
+	 * When `devMode` is set to true, the `shutdown` function will emit a "AppEvent" global event with type "Shutdown" instead of shutting down the game engine.
+	 */
+	devMode: boolean;
+
+	/**
 	 * The application window size.
 	 * May differ from visual size due to the different DPIs of display devices.
 	 * It is not available to set this property on platform Android and iOS.
@@ -703,7 +704,8 @@ interface App {
 	openFileDialog(folderOnly: boolean, callback: (path: string) => void): void;
 
 	/**
-	 * A function that shuts down the game engine.
+	 * A function that shuts down and exits the game engine.
+	 * When `devMode` is set to true, the `shutdown` function will only emit a "AppEvent" global event with type "Shutdown", instead of shutting down the game engine.
 	 * It is not working and acts as a dummy function for platform Android and iOS to follow the specification of how mobile platform applications should operate.
 	 */
 	shutdown(): void;
@@ -1475,6 +1477,13 @@ class Audio {
 	 * @param fadeTime The time (in seconds) to fade out the streaming audio. Default is 0.0.
 	 */
 	stopStream(fadeTime?: number): void;
+
+	/**
+	 * Stops all the playing audio sources.
+	 *
+	 * @param fadeTime The time (in seconds) to fade out the audio sources. Default is 0.0.
+	 */
+	stopAll(fadeTime?: number): void;
 
 	/**
 	 * Pauses all currently playing audio.
@@ -2737,7 +2746,7 @@ const enum GlobalEvent {
 
 export {GlobalEvent as GSlot};
 
-type AppEventType = "Quit" | "LowMemory" | "WillEnterBackground" | "DidEnterBackground" | "WillEnterForeground" | "DidEnterForeground";
+type AppEventType = "Quit" | "LowMemory" | "WillEnterBackground" | "DidEnterBackground" | "WillEnterForeground" | "DidEnterForeground" | "Shutdown";
 type AppSettingName = "Locale" | "Theme" | "FullScreen" | "Position" | "Size";
 type AppWSEventType = "Open" | "Close" | "Send" | "Receive";
 
@@ -6262,7 +6271,7 @@ class Sprite extends Node {
 	/**
 	 * The texture for the sprite.
 	 */
-	texture: Texture2D;
+	readonly texture: Texture2D;
 
 	/**
 	 * The texture wrapping mode for the U (horizontal) axis.
@@ -7617,13 +7626,13 @@ interface json {
 	 * @param maxDepth The maximum depth to parse (default is 128).
 	 * @returns The object representing the JSON data, or null with an error message if the JSON text is invalid.
 	 */
-	load(this: void, json: string, maxDepth?: number): LuaMultiReturn<[any, null]> | LuaMultiReturn<[null, string]>;
+	decode(this: void, json: string, maxDepth?: number): LuaMultiReturn<[any, null]> | LuaMultiReturn<[null, string]>;
 	/**
 	 * Converts the specified object to JSON text.
 	 * @param obj The object to convert.
 	 * @returns The JSON text representing the object, or null with an error message if the object cannot be converted.
 	 */
-	dump(this: void, obj: object): LuaMultiReturn<[string, null]> | LuaMultiReturn<[null, string]>;
+	encode(this: void, obj: object): LuaMultiReturn<[string, null]> | LuaMultiReturn<[null, string]>;
 	/**
 	 * Represents the JSON null value.
 	 */
@@ -7690,6 +7699,16 @@ interface Wasm {
 
 const wasm: Wasm;
 export {wasm as Wasm};
+
+/**
+ * Creates a new `Color` object using the RGBA color channel values.
+ * @param r The red channel value (0-255).
+ * @param g The green channel value (0-255).
+ * @param b The blue channel value (0-255).
+ * @param a The alpha channel value (0-1).
+ * @returns The new `Color` object.
+ */
+export function rgba(this: void, r: number, g: number, b: number, a: number): Color;
 
 } // module "Dora"
 

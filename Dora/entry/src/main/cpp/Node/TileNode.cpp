@@ -456,6 +456,17 @@ void TileNode::render() {
 	Node::render();
 }
 
+void TileNode::cleanup() {
+	if (_flags.isOff(Node::Cleanup)) {
+		Node::cleanup();
+		_effect = nullptr;
+		_tmxDef = nullptr;
+		_tileQuads.clear();
+		_animatedTiles.clear();
+		_animations.clear();
+	}
+}
+
 bool TileNode::update(double deltaTime) {
 	if (isUpdating()) {
 		bool tileUpdated = false;
@@ -716,6 +727,7 @@ static Dictionary* getLayerDict(tmx::Layer* target, const tmx::Map& map) {
 }
 
 Dictionary* TileNode::getLayer(String layerName) const {
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid TileNode");
 	const auto& map = _tmxDef->getMap();
 	tmx::Layer* target = nullptr;
 	for (const auto& layer : map.getLayers()) {

@@ -3222,6 +3222,8 @@ local function clear_redundant_errors(errors)
 	local lastx, lasty = 0, 0
 	for i, err in ipairs(errors) do
 		err.i = i
+		err.x = err.x or -1
+		err.y = err.y or -1
 	end
 	table.sort(errors, function(a, b)
 		local af = a.filename or ""
@@ -3233,10 +3235,14 @@ local function clear_redundant_errors(errors)
 	end)
 	for i, err in ipairs(errors) do
 		err.i = nil
-		if err.x == lastx and err.y == lasty then
+		if err.x >= 0 and err.y >= 0 then
+			if err.x == lastx and err.y == lasty then
+				table.insert(redundant, i)
+			end
+			lastx, lasty = err.x, err.y
+		else
 			table.insert(redundant, i)
 		end
-		lastx, lasty = err.x, err.y
 	end
 	for i = #redundant, 1, -1 do
 		table.remove(errors, redundant[i])
@@ -11122,7 +11128,7 @@ tl.dora_infer = function(codes, line, row, search_path)
 			end
 			if current_type.types then
 				local id = current_type.types[1]
-				current_type = get_real_type(type_report, id)
+				current_type = get_real_type(type_report, id) or current_type
 			end
 			return {
 				str = str,
@@ -11201,15 +11207,17 @@ tl.dora_signature = function(codes, line, row, search_path)
 			elseif current_type.types then
 				for _, id in ipairs(current_type.types) do
 					local tp = get_real_type(type_report, id)
-					local item_id = tp.fields[item]
-					if item_id then
-						if i == #chains then
-							current_type = type_report.types[item_id]
-						else
-							current_type = get_real_type(type_report, item_id)
+					if tp and tp.fields then
+						local item_id = tp.fields[item]
+						if item_id then
+							if i == #chains then
+								current_type = type_report.types[item_id]
+							else
+								current_type = get_real_type(type_report, item_id)
+							end
+							matched = true
+							break
 						end
-						matched = true
-						break
 					end
 				end
 			elseif current_type.fields then

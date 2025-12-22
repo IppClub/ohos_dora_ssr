@@ -1,5 +1,6 @@
 import (
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -287,7 +288,7 @@ func ObjectFrom(raw: i64) => *Object {
 		return nil
 	}
 	object := Object{raw: &raw}
-	setFinalizer(object.raw, ObjectFinalizer)
+	runtime.SetFinalizer(object.raw, ObjectFinalizer)
 	return &object
 }
 
@@ -316,7 +317,7 @@ func ObjectFinalizer(ptr: u32) {
 
 func createObject(raw: i64) => Object {
 	object := Object{raw: &raw}
-	setFinalizer(object.raw, ObjectFinalizer)
+	runtime.SetFinalizer(object.raw, ObjectFinalizer)
 	return object
 }
 
@@ -517,7 +518,7 @@ func value_finalizer(ptr: u32) {
 func ValueFrom(ptr: i64) => Value {
 	raw := &ptr
 	value := Value{raw: raw}
-	setFinalizer(raw, value_finalizer)
+	runtime.SetFinalizer(raw, value_finalizer)
 	return value
 }
 
@@ -525,7 +526,7 @@ func ValueFrom(ptr: i64) => Value {
 func NewValue(v: i64) => Value {
 	raw := value_create_i64(v)
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
@@ -540,42 +541,42 @@ func NewF32Value(v: f32) => Value {
 func NewF64Value(v: f64) => Value {
 	raw := value_create_f64(v)
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
 func NewStrValue(v: string) => Value {
 	raw := value_create_str(ToDoraString(v))
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
 func NewBoolValue(v: bool) => Value {
 	raw := value_create_bool(ToDoraBool(v))
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
 func NewObjectValue(v: Object) => Value {
 	raw := value_create_object(*v.raw)
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
 func NewVec2Value(v: Vec2) => Value {
 	raw := value_create_vec2(v.ToValue())
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
 func NewSizeValue(v: Size) => Value {
 	raw := value_create_size(v.ToValue())
 	value := Value{raw: &raw}
-	setFinalizer(value.raw, value_finalizer)
+	runtime.SetFinalizer(value.raw, value_finalizer)
 	return value
 }
 
@@ -668,7 +669,7 @@ func call_stack_finalizer(ptr: u32) {
 func NewCallStack() => CallStack {
 	raw := call_stack_create()
 	callStack := CallStack{raw: &raw}
-	setFinalizer(callStack.raw, call_stack_finalizer)
+	runtime.SetFinalizer(callStack.raw, call_stack_finalizer)
 	return callStack
 }
 
@@ -3347,22 +3348,22 @@ func _ImGui.BeginPopupModalOpts(name: string, window_flags: _ImGuiWindowFlags, i
 	}
 }
 
-func _ImGui.BeginPopupModalRet(name: string, opened: bool, inside: func()) => bool {
+func _ImGui.BeginPopupModalRet(name: string, opened: bool, inside: func()) => (bool, bool) {
 	return this.BeginPopupModalRetOpts(name, opened, ImGuiWindowDefault, inside)
 }
 
-func _ImGui.BeginPopupModalRetOpts(name: string, opened: bool, window_flags: _ImGuiWindowFlags, inside: func()) => bool {
+func _ImGui.BeginPopupModalRetOpts(name: string, opened: bool, window_flags: _ImGuiWindowFlags, inside: func()) => (bool, bool) {
 	imgui_stack.Push(opened)
 	changed := this._BeginPopupModalRetOpts(name, imgui_stack, window_flags.value)
 	res_opened, ok := imgui_stack.PopBool()
 	if !ok {
 		panic("failed to pop bool")
 	}
-	if res_opened {
+	if changed {
 		inside()
 		this._EndPopup()
 	}
-	return changed
+	return changed, res_opened
 }
 
 type _ImGuiMouseButton :struct {
@@ -3834,7 +3835,7 @@ global ImGuiTabBarFlagNoCloseWithMiddleMouseButton = _ImGuiTabBarFlag{value: 1 <
 global ImGuiTabBarFlagNoTabListScrollingButtons = _ImGuiTabBarFlag{value: 1 << 4}
 global ImGuiTabBarFlagNoTooltip = _ImGuiTabBarFlag{value: 1 << 5}
 global ImGuiTabBarFlagDrawSelectedOverline = _ImGuiTabBarFlag{value: 1 << 6}
-global ImGuiTabBarFlagFittingPolicyResizeDown = _ImGuiTabBarFlag{value: 1 << 7}
+global ImGuiTabBarFlagFittingPolicyShrink = _ImGuiTabBarFlag{value: 1 << 7}
 global ImGuiTabBarFlagFittingPolicyScroll = _ImGuiTabBarFlag{value: 1 << 8}
 
 type _ImGuiTabBarFlags :struct {

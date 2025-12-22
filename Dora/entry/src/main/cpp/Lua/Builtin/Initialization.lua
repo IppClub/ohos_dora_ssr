@@ -276,7 +276,7 @@ end
 
 -- async functions
 do
-	local Content = Dora.Content
+	local Content = getmetatable(Dora.Content)
 	local wait = Dora.wait
 	local Content_loadAsync = Content.loadAsync
 	Content.loadAsync = function(self, filename)
@@ -431,7 +431,7 @@ do
 		return saved
 	end
 
-	local DB = Dora.DB
+	local DB = getmetatable(Dora.DB)
 	local DB_queryAsync = DB.queryAsync
 	DB.queryAsync = function(self, ...)
 		local _, mainThread = coroutine.running()
@@ -561,7 +561,7 @@ do
 		return result
 	end
 
-	local HttpServer = Dora.HttpServer
+	local HttpServer = getmetatable(Dora.HttpServer)
 	local HttpServer_postSchedule = HttpServer.postSchedule
 	HttpServer.postSchedule = function(self, pattern, scheduleFunc)
 		HttpServer_postSchedule(self, pattern, function(req)
@@ -571,7 +571,7 @@ do
 		end)
 	end
 
-	local HttpClient = Dora.HttpClient
+	local HttpClient = getmetatable(Dora.HttpClient)
 	local HttpClient_downloadAsync = HttpClient.downloadAsync
 	HttpClient.downloadAsync = function(self, url, filePath, timeout, progress)
 		local _, mainThread = coroutine.running()
@@ -1269,9 +1269,9 @@ end
 -- Dora json wrapper
 do
 	local json = Dora.json
-	local jsonLoad = json.load
-	json.load = function(str, maxdepth)
-		local success, result = pcall(jsonLoad, str, maxdepth)
+	local jsonDecode = json.decode
+	json.decode = function(str, maxdepth)
+		local success, result = pcall(jsonDecode, str, maxdepth)
 		if success then
 			return result
 		else
@@ -1279,15 +1279,20 @@ do
 		end
 	end
 
-	local jsonDump = json.dump
-	json.dump = function(obj)
-		local success, result = pcall(jsonDump, obj)
+	local jsonEncode = json.encode
+	json.encode = function(obj)
+		local success, result = pcall(jsonEncode, obj)
 		if success then
 			return result
 		else
 			return nil, result
 		end
 	end
+end
+
+-- Dora Color helper
+Dora.rgba = function(r, g, b, a)
+	return Dora.Color(r, g, b, a * 255)
 end
 
 -- Dora helpers

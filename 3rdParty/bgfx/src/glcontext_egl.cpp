@@ -199,7 +199,7 @@ WL_EGL_IMPORT
 
 			BGFX_FATAL(m_surface != EGL_NO_SURFACE, Fatal::UnableToInitialize, "Failed to create surface.");
 
-			m_context = eglCreateContext(m_display, _config, _context, nullptr);//s_contextAttrs);
+			m_context = eglCreateContext(m_display, _config, _context, s_contextAttrs);
 			BX_ASSERT(NULL != m_context, "Create swap chain failed: %x", eglGetError() );
 
 			makeCurrent();
@@ -476,7 +476,7 @@ WL_EGL_IMPORT
 
 				bx::write(&writer, EGLint(EGL_NONE), bx::ErrorAssert{} );
 
-				m_context = eglCreateContext(m_display, m_config, EGL_NO_CONTEXT, nullptr);//s_contextAttrs);
+				m_context = eglCreateContext(m_display, m_config, EGL_NO_CONTEXT, s_contextAttrs);
 				if (NULL != m_context)
 				{
 					break;

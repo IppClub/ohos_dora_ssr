@@ -344,6 +344,7 @@ void ParticleNode::addParticle() {
 }
 
 void ParticleNode::start() {
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid ParticleNode");
 	_flags.setOn(ParticleNode::Active);
 	_flags.setOn(ParticleNode::Emitting);
 	_elapsed = 0;
@@ -351,6 +352,7 @@ void ParticleNode::start() {
 }
 
 void ParticleNode::stop() {
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid ParticleNode");
 	_flags.setOff(ParticleNode::Active);
 	_elapsed = _particleDef->duration;
 	_emitCounter = 0;
@@ -571,6 +573,15 @@ void ParticleNode::render() {
 	SharedSpriteRenderer.push(_quads[0], _quads.size() * 4, _effect, _texture, _renderState);
 
 	Node::render();
+}
+
+void ParticleNode::cleanup() {
+	if (_flags.isOff(Node::Cleanup)) {
+		Node::cleanup();
+		_texture = nullptr;
+		_effect = nullptr;
+		_particleDef = nullptr;
+	}
 }
 
 NS_DORA_END

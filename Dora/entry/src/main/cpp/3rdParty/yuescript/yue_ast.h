@@ -68,7 +68,7 @@ class Statement_t;
 class Body_t;
 class AssignableNameList_t;
 class StarExp_t;
-class CompInner_t;
+class CompFor_t;
 class AssignableChain_t;
 class UnaryExp_t;
 class Parens_t;
@@ -102,11 +102,6 @@ AST_NODE(Variable)
 	ast_sel<true, Name_t, UnicodeName_t> name;
 	AST_MEMBER(Variable, &name)
 AST_END(Variable)
-
-AST_NODE(LabelName)
-	ast_ptr<true, UnicodeName_t> name;
-	AST_MEMBER(LabelName, &name)
-AST_END(LabelName)
 
 AST_NODE(LuaKeyword)
 	ast_ptr<true, Name_t> name;
@@ -246,12 +241,12 @@ AST_NODE(Import)
 AST_END(Import)
 
 AST_NODE(Label)
-	ast_ptr<true, LabelName_t> label;
+	ast_ptr<true, UnicodeName_t> label;
 	AST_MEMBER(Label, &label)
 AST_END(Label)
 
 AST_NODE(Goto)
-	ast_ptr<true, LabelName_t> label;
+	ast_ptr<true, UnicodeName_t> label;
 	AST_MEMBER(Goto, &label)
 AST_END(Goto)
 
@@ -363,14 +358,14 @@ AST_NODE(ForStepValue)
 	AST_MEMBER(ForStepValue, &value)
 AST_END(ForStepValue)
 
-AST_NODE(For)
+AST_NODE(ForNum)
 	ast_ptr<true, Variable_t> varName;
 	ast_ptr<true, Exp_t> startValue;
 	ast_ptr<true, Exp_t> stopValue;
 	ast_ptr<false, ForStepValue_t> stepValue;
 	ast_sel<true, Block_t, Statement_t> body;
-	AST_MEMBER(For, &varName, &startValue, &stopValue, &stepValue, &body)
-AST_END(For)
+	AST_MEMBER(ForNum, &varName, &startValue, &stopValue, &stepValue, &body)
+AST_END(ForNum)
 
 AST_NODE(ForEach)
 	ast_ptr<true, AssignableNameList_t> nameList;
@@ -378,6 +373,11 @@ AST_NODE(ForEach)
 	ast_sel<true, Block_t, Statement_t> body;
 	AST_MEMBER(ForEach, &nameList, &loopValue, &body)
 AST_END(ForEach)
+
+AST_NODE(For)
+	ast_sel<true, ForEach_t, ForNum_t> forLoop;
+	AST_MEMBER(For, &forLoop)
+AST_END(For)
 
 AST_NODE(Do)
 	ast_ptr<true, Body_t> body;
@@ -399,7 +399,7 @@ AST_END(Try)
 
 AST_NODE(Comprehension)
 	ast_ptr<true, Seperator_t> sep;
-	ast_sel_list<false, NormalDef_t, SpreadListExp_t, CompInner_t,
+	ast_sel_list<false, NormalDef_t, SpreadListExp_t, CompFor_t,
 		/*non-syntax-rule*/ Statement_t> items;
 	AST_MEMBER(Comprehension, &sep, &items)
 AST_END(Comprehension)
@@ -412,7 +412,7 @@ AST_END(CompValue)
 AST_NODE(TblComprehension)
 	ast_ptr<true, Exp_t> key;
 	ast_ptr<false, CompValue_t> value;
-	ast_ptr<true, CompInner_t> forLoop;
+	ast_ptr<true, CompFor_t> forLoop;
 	AST_MEMBER(TblComprehension, &key, &value, &forLoop)
 AST_END(TblComprehension)
 
@@ -427,23 +427,23 @@ AST_NODE(CompForEach)
 	AST_MEMBER(CompForEach, &nameList, &loopValue)
 AST_END(CompForEach)
 
-AST_NODE(CompFor)
+AST_NODE(CompForNum)
 	ast_ptr<true, Variable_t> varName;
 	ast_ptr<true, Exp_t> startValue;
 	ast_ptr<true, Exp_t> stopValue;
 	ast_ptr<false, ForStepValue_t> stepValue;
-	AST_MEMBER(CompFor, &varName, &startValue, &stopValue, &stepValue)
-AST_END(CompFor)
+	AST_MEMBER(CompForNum, &varName, &startValue, &stopValue, &stepValue)
+AST_END(CompForNum)
 
-AST_NODE(CompInner)
+AST_NODE(CompFor)
 	ast_ptr<true, Seperator_t> sep;
-	ast_sel_list<true, CompFor_t, CompForEach_t, Exp_t> items;
-	AST_MEMBER(CompInner, &sep, &items)
-AST_END(CompInner)
+	ast_sel_list<true, CompForNum_t, CompForEach_t, Exp_t> items;
+	AST_MEMBER(CompFor, &sep, &items)
+AST_END(CompFor)
 
 AST_NODE(Assign)
 	ast_ptr<true, Seperator_t> sep;
-	ast_sel_list<true, With_t, If_t, Switch_t, TableBlock_t, Exp_t> values;
+	ast_sel_list<true, With_t, If_t, Switch_t, TableBlock_t, Exp_t, SpreadListExp_t> values;
 	AST_MEMBER(Assign, &sep, &values)
 AST_END(Assign)
 
@@ -558,7 +558,7 @@ AST_NODE(SimpleValue)
 	ast_sel<true,
 		TableLit_t, ConstValue_t,
 		If_t, Switch_t, With_t, ClassDecl_t,
-		ForEach_t, For_t, While_t, Repeat_t,
+		For_t, While_t, Repeat_t,
 		Do_t, Try_t, UnaryValue_t,
 		TblComprehension_t, Comprehension_t,
 		FunLit_t, Num_t, VarArg_t> value;
@@ -780,7 +780,7 @@ AST_NODE(Export)
 AST_END(Export)
 
 AST_NODE(FnArgDef)
-	ast_sel<true, Variable_t, SelfItem_t> name;
+	ast_sel<true, Variable_t, SelfItem_t, SimpleTable_t, TableLit_t> name;
 	ast_ptr<false, ExistentialOp_t> op;
 	ast_ptr<false, Name_t> label;
 	ast_ptr<false, Exp_t> defaultValue;
@@ -848,7 +848,7 @@ AST_NODE(Macro)
 AST_END(Macro)
 
 AST_NODE(NameOrDestructure)
-	ast_sel<true, Variable_t, TableLit_t, Comprehension_t> item;
+	ast_sel<true, Variable_t, SimpleTable_t, TableLit_t, Comprehension_t> item;
 	AST_MEMBER(NameOrDestructure, &item)
 AST_END(NameOrDestructure)
 
@@ -924,7 +924,7 @@ AST_NODE(PipeBody)
 AST_END(PipeBody)
 
 AST_NODE(StatementAppendix)
-	ast_sel<true, IfLine_t, WhileLine_t, CompInner_t> item;
+	ast_sel<true, IfLine_t, WhileLine_t, CompFor_t> item;
 	AST_MEMBER(StatementAppendix, &item)
 AST_END(StatementAppendix)
 
@@ -934,13 +934,16 @@ AST_END(StatementSep)
 AST_LEAF(YueLineComment)
 AST_END(YueLineComment)
 
-AST_LEAF(MultilineCommentInner)
-AST_END(MultilineCommentInner)
-
-AST_NODE(YueMultilineComment)
-	ast_ptr<true, MultilineCommentInner_t> inner;
-	AST_MEMBER(YueMultilineComment, &inner)
+AST_LEAF(YueMultilineComment)
 AST_END(YueMultilineComment)
+
+AST_NODE(YueComment)
+	ast_sel<true, YueLineComment_t, YueMultilineComment_t> comment;
+	AST_MEMBER(YueComment, &comment)
+AST_END(YueComment)
+
+AST_LEAF(EmptyLine)
+AST_END(EmptyLine)
 
 AST_NODE(ChainAssign)
 	ast_ptr<true, Seperator_t> sep;
@@ -950,16 +953,14 @@ AST_NODE(ChainAssign)
 AST_END(ChainAssign)
 
 AST_NODE(Statement)
-	ast_ptr<true, Seperator_t> sep;
-	ast_sel_list<false, YueLineComment_t, YueMultilineComment_t> comments;
 	ast_sel<true,
-		Import_t, While_t, Repeat_t, For_t, ForEach_t,
+		Import_t, While_t, Repeat_t, For_t,
 		Return_t, Local_t, Global_t, Export_t, Macro_t, MacroInPlace_t,
 		BreakLoop_t, Label_t, Goto_t, ShortTabAppending_t,
 		Backcall_t, LocalAttrib_t, PipeBody_t, ExpListAssign_t, ChainAssign_t
 	> content;
 	ast_ptr<false, StatementAppendix_t> appendix;
-	AST_MEMBER(Statement, &sep, &comments, &content, &appendix)
+	AST_MEMBER(Statement, &content, &appendix)
 AST_END(Statement)
 
 AST_NODE(Body)
@@ -969,8 +970,8 @@ AST_END(Body)
 
 AST_NODE(Block)
 	ast_ptr<true, Seperator_t> sep;
-	ast_list<false, Statement_t> statements;
-	AST_MEMBER(Block, &sep, &statements)
+	ast_sel_list<false, Statement_t, YueComment_t, EmptyLine_t> statementOrComments;
+	AST_MEMBER(Block, &sep, &statementOrComments)
 AST_END(Block)
 
 AST_NODE(BlockEnd)
@@ -989,9 +990,9 @@ struct YueFormat {
 	int indent = 0;
 	bool spaceOverTab = false;
 	int tabSpaces = 4;
+	bool reserveComment = true;
 	std::string toString(ast_node* node);
 
-	Converter converter{};
 	void pushScope();
 	void popScope();
 	std::string convert(const ast_node* node);

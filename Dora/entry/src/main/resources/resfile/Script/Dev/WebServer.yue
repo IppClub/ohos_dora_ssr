@@ -132,22 +132,22 @@ luaCheckWithLineInfo = (file, luaCodes) ->
 	return true, info
 
 getCompiledYueLine = (content, line, row, file, lax) ->
-	luaCodes, _info = yueCheck file, content, lax
+	luaCodes = yueCheck file, content, lax
 	return nil unless luaCodes
 	current = 1
 	lastLine = 1
-	targetLine = nil
+	targetLine = line\gsub("::", "\\")\gsub(":", "=")\gsub("\\", ":")\match "[%w_%.:]+$"
 	targetRow = nil
 	lineMap = {}
 	for lineCode in luaCodes\gmatch "([^\r\n]*)\r?\n?"
 		num = lineCode\match "--%s*(%d+)%s*$"
 		lastLine = tonumber num if num
 		lineMap[current] = lastLine
-		if row <= lastLine and not targetLine
+		if row <= lastLine and not targetRow
 			targetRow = current
-			targetLine = line\gsub("::", "\\")\gsub(":", "=")\gsub("\\", ":")\match "[%w_%.:]+$"
-			break if targetLine
+			break
 		current += 1
+	targetRow = current
 	if targetLine and targetRow
 		luaCodes, targetLine, targetRow, lineMap
 	else
@@ -215,7 +215,7 @@ HttpServer\postSchedule "/infer", (req): success: false ->
 				updateInferedDesc infered
 				return success: true, :infered
 		when "yue"
-			luaCodes, targetLine, targetRow, lineMap = getCompiledYueLine content, line, row, file, false
+			luaCodes, targetLine, targetRow, lineMap = getCompiledYueLine content, line, row, file, true
 			return success: false unless luaCodes
 			infered = teal.inferAsync luaCodes, targetLine, targetRow, searchPath
 			if infered?
@@ -292,7 +292,7 @@ HttpServer\postSchedule "/signature", (req): success: false ->
 				if signatures := getParamDocs signatures
 					return success: true, :signatures
 		when "yue"
-			luaCodes, targetLine, targetRow, _lineMap = getCompiledYueLine content, line, row, file, false
+			luaCodes, targetLine, targetRow, _lineMap = getCompiledYueLine content, line, row, file, true
 			return success: false unless luaCodes
 			if chainOp, chainCall := line\match "[^%w_]([%.\\])([^%.\\]+)$"
 				if withVar := luaCodes\match "([%w_]+)%.___DUMMY_CALL___%(%)"
@@ -449,8 +449,8 @@ HttpServer\postSchedule "/complete", (req): success: false ->
 		until true
 		switch lang when "tl", "lua"
 			suggestions = teal.completeAsync content, line, row, searchPath
-			if not line\match("[%.:]$")
-				checkSet = {name, true for {name} in *suggestions}
+			if not line\match "[%.:]$"
+				checkSet = {name, true for [name,] in *suggestions}
 				for item in *teal.completeAsync "", "Dora.", 1, searchPath
 					suggestions[] = item if not checkSet[item[1]]
 				for word in *luaKeywords
@@ -497,7 +497,7 @@ HttpServer\upload(
 	"/upload"
 	(req, filename): nil ->
 		switch req when {params: {:path}}
-			uploadPath = Path Content.appPath, ".upload"
+			uploadPath = Path Content.writablePath, ".upload"
 			if not Content\exist uploadPath
 				Content\mkdir uploadPath
 			targetPath = Path uploadPath, filename
@@ -507,7 +507,7 @@ HttpServer\upload(
 		switch req when {params: {:path}}
 			path = Path Content.writablePath, path
 			if Content\exist path
-				uploadPath = Path Content.appPath, ".upload"
+				uploadPath = Path Content.writablePath, ".upload"
 				targetPath = Path path, Path\getRelative file, uploadPath
 				Content\mkdir Path\getPath targetPath
 				if Content\move file, targetPath
@@ -552,30 +552,31 @@ HttpServer\post "/info", ->
 		:webProfiler
 		:drawerWidth
 
-HttpServer\post "/new", (req): success: false ->
+HttpServer\post "/new", (req): success: false, message: "Failed" ->
 	switch req when {body: {:path, :content, :folder}}
-		if not Content\exist path
-			parent = Path\getPath path
-			files = Content\getFiles parent
-			if folder
-				name = Path\getFilename(path)\lower!
-				for file in *files
-					if name == Path\getFilename(file)\lower!
-						return success: false
-				if Content\mkdir path
-					return success: true
-			else
-				name = Path\getName(path)\lower!
-				for file in *files
-					if name == Path\getName(file)\lower!
-						ext = Path\getExt file
-						if ext not in ["tl", "yue", "ts", "tsx", "vs", "bl", "xml", "lua"]
-							continue
-						elseif ("d" == Path\getExt name) and (ext ~= Path\getExt path)
-							continue
-						return success: false
-				if Content\save path, content
-					return success: true
+		if Content\exist path
+			return success: false, message: "TargetExisted" 
+		parent = Path\getPath path
+		files = Content\getFiles parent
+		if folder
+			name = Path\getFilename(path)\lower!
+			for file in *files
+				if name == Path\getFilename(file)\lower!
+					return success: false, message: "TargetExisted"
+			if Content\mkdir path
+				return success: true
+		else
+			name = Path\getName(path)\lower!
+			for file in *files
+				if name == Path\getName(file)\lower!
+					ext = Path\getExt file
+					if ext not in ["tl", "yue", "ts", "tsx", "vs", "bl", "xml", "lua"]
+						continue
+					elseif ("d" == Path\getExt name) and (ext ~= Path\getExt path)
+						continue
+					return success: false, message: "SourceExisted"
+			if Content\save path, content
+				return success: true
 
 HttpServer\post "/delete", (req): success: false ->
 	switch req when {body: {:path}}
@@ -870,17 +871,17 @@ HttpServer\postSchedule "/run", (req): success: false ->
 			if workDir := getProjectDirFromFile file
 				Entry.allClear!
 				target = Path workDir, "init"
-				success, err = Entry.enterEntryAsync ["Project", target]
+				success, err = Entry.enterEntryAsync entryName: "Project", fileName: target
 				target = target |> Path\getPath |> Path\getName
 				return :success, :target, :err
 		else
 			workDir = getProjectDirFromFile file
 		Entry.allClear!
 		file = Path\replaceExt file, ""
-		success, err = Entry.enterEntryAsync {
-			Path\getName(file), file
+		success, err = Entry.enterEntryAsync
+			entryName: Path\getName file
+			fileName: file
 			:workDir
-		}
 		return :success, :err
 
 HttpServer\postSchedule "/stop", ->
@@ -935,9 +936,9 @@ HttpServer\postSchedule "/zip", (req): success: false ->
 		goto failed unless Content\exist path
 		Content\mkdir Path\getPath zipFile
 		if obfuscated
-			scriptPath = Path Content.appPath, ".download", ".script"
-			obfuscatedPath = Path Content.appPath, ".download", ".obfuscated"
-			tempPath = Path Content.appPath, ".download", ".temp"
+			scriptPath = Path Content.writablePath, ".download", ".script"
+			obfuscatedPath = Path Content.writablePath, ".download", ".obfuscated"
+			tempPath = Path Content.writablePath, ".download", ".temp"
 			Content\remove scriptPath
 			Content\remove obfuscatedPath
 			Content\remove tempPath
@@ -974,7 +975,7 @@ HttpServer\post "/editing-info", (req) ->
 	else
 		if not config.editingInfo?
 			folder = if App.locale\match '^zh' then 'zh-Hans' else 'en'
-			config.editingInfo = json.dump {
+			config.editingInfo = json.encode {
 				index: 0
 				files: [
 					{
@@ -993,7 +994,7 @@ HttpServer\post "/command", (req): success: false ->
 HttpServer\post "/log/save", (): success: false ->
 	folder = ".download"
 	fullLogFile = "dora_full_logs.txt"
-	fullFolder = Path Content.appPath, folder
+	fullFolder = Path Content.writablePath, folder
 	Content\mkdir fullFolder
 	logPath = Path fullFolder, fullLogFile
 	if App\saveLog logPath
@@ -1002,13 +1003,20 @@ HttpServer\post "/log/save", (): success: false ->
 HttpServer\post "/yarn/check", (req): success: false ->
 	import "yarncompile"
 	switch req when {body: {:code}}
-		if jsonObject := json.load code
+		if jsonObject := json.decode code
 			errors = []
 			for node in *jsonObject.nodes
 				:title, :body = node
 				unless luaCode, err := yarncompile body
 					errors[] = title .. ":" .. err
 			return success: true, syntaxError: table.concat errors, "\n\n"
+
+HttpServer\post "/yarn/check-file", (req): success: true ->
+	import "yarncompile"
+	switch req when {body: {:code}}
+		unless res, _, err := yarncompile code, true
+			[message, line, column, node] = err
+			return success: false, :message, :line, :column, :node
 
 getWaProjectDirFromFile = (file) ->
 	:writablePath = Content
@@ -1086,14 +1094,14 @@ HttpServer\postSchedule "/ts/build", (req): success: false ->
 			content = Content\load path
 			unless content
 				return success: false, message: "failed to read file"
-			emit "AppWS", "Send", json.dump name: "UpdateTSCode", file: path, :content
+			emit "AppWS", "Send", json.encode name: "UpdateTSCode", file: path, :content
 			if "d" ~= Path\getExt Path\getName path
 				done = false
 				with Node!
 					\gslot "AppWS", (eventType, msg) ->
 						if eventType == "Receive"
 							\removeFromParent!
-							if res := json.load msg
+							if res := json.decode msg
 								if res.name == "TranspileTS"
 									if res.success
 										luaFile = Path\replaceExt path, "lua"
@@ -1102,7 +1110,7 @@ HttpServer\postSchedule "/ts/build", (req): success: false ->
 									else
 										messages[] = success: false, file: path, message: res.message
 									done = true
-				emit "AppWS", "Send", json.dump name: "TranspileTS", file: path, :content
+				emit "AppWS", "Send", json.encode name: "TranspileTS", file: path, :content
 				wait -> done
 			return success: true, :messages
 		else
@@ -1114,7 +1122,7 @@ HttpServer\postSchedule "/ts/build", (req): success: false ->
 				file = Path path, f
 				if content := Content\load file
 					fileData[file] = content
-					emit "AppWS", "Send", json.dump name: "UpdateTSCode", :file, :content
+					emit "AppWS", "Send", json.encode name: "UpdateTSCode", :file, :content
 				else
 					messages[] = success: false, :file, message: "failed to read file"
 			for file, content in pairs fileData
@@ -1124,7 +1132,7 @@ HttpServer\postSchedule "/ts/build", (req): success: false ->
 					\gslot "AppWS", (eventType, msg) ->
 						if eventType == "Receive"
 							\removeFromParent!
-							if res := json.load msg
+							if res := json.decode msg
 								if res.name == "TranspileTS"
 									if res.success
 										luaFile = Path\replaceExt file, "lua"
@@ -1133,9 +1141,15 @@ HttpServer\postSchedule "/ts/build", (req): success: false ->
 									else
 										messages[] = success: false, :file, message: res.message
 									done = true
-				emit "AppWS", "Send", json.dump name: "TranspileTS", :file, :content
+				emit "AppWS", "Send", json.encode name: "TranspileTS", :file, :content
 				wait -> done
 			return success: true, :messages
+
+HttpServer\post "/download", (req): success: false ->
+	switch req when body: {:url, :target}
+		import "Script.Dev.Entry"
+		Entry.downloadFile url, target
+		return success: true
 
 status = {}
 export default status

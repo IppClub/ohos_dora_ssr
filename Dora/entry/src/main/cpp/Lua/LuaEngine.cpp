@@ -671,7 +671,7 @@ static int dora_yue_check_async(lua_State* L) {
 		auto result = yue::YueCompiler{nullptr, dora_open_threaded_compiler}.compile(codes, config);
 		return Values::alloc(result);
 	},
-		[handler](Own<Values> values) {
+		[handler, lax](Own<Values> values) {
 			yue::CompileInfo result;
 			values->get(result);
 			auto L = SharedLuaEngine.getState();
@@ -694,6 +694,7 @@ static int dora_yue_check_async(lua_State* L) {
 			}
 			if (result.globals) {
 				for (const auto& global : *result.globals) {
+					if (global.defined) continue;
 					lua_createtable(L, 4, 0);
 					tolua_pushslice(L, "global"_slice);
 					lua_rawseti(L, -2, 1);
@@ -706,7 +707,7 @@ static int dora_yue_check_async(lua_State* L) {
 					lua_rawseti(L, -2, ++i);
 				}
 			}
-			if (result.error) {
+			if (!lax && result.error) {
 				LuaEngine::invoke(L, handler->get(), 1, 0);
 			} else {
 				tolua_pushslice(L, result.codes);
@@ -781,6 +782,7 @@ static int dora_yue_compile(lua_State* L) {
 								lua_createtable(L, s_cast<int>(result.globals->size()), 0);
 								int i = 1;
 								for (const auto& var : *result.globals) {
+									if (var.defined) continue;
 									lua_createtable(L, 3, 0);
 									lua_pushlstring(L, var.name.c_str(), var.name.size());
 									lua_rawseti(L, -2, 1);
@@ -822,7 +824,16 @@ static int dora_yarn_compile(lua_State* L) {
 	size_t len = 0;
 	const char* str = luaL_checklstring(L, 1, &len);
 	Slice codes{str, len};
-	auto res = yarnflow::compile({codes.rawData(), codes.size()});
+	bool file = false;
+	if (lua_gettop(L) >= 2) {
+		file = lua_toboolean(L, 2) != 0;
+	}
+	yarnflow::CompileInfo res;
+	if (file) {
+		res = yarnflow::compileFile({codes.rawData(), codes.size()});
+	} else {
+		res = yarnflow::compileNode({codes.rawData(), codes.size()});
+	}
 	if (res.error) {
 		const auto& error = res.error.value();
 		lua_pushnil(L);
@@ -834,6 +845,8 @@ static int dora_yarn_compile(lua_State* L) {
 		lua_rawseti(L, -2, 2);
 		lua_pushinteger(L, error.col);
 		lua_rawseti(L, -2, 3);
+		tolua_pushslice(L, error.nodeName);
+		lua_rawseti(L, -2, 4);
 		return 3;
 	} else {
 		tolua_pushslice(L, res.codes);
@@ -1152,7 +1165,7 @@ LuaEngine::LuaEngine()
 			pushOptions(L, -3);
 			BLOCK_START
 			if (lua_pcall(L, 3, 2, 0) != 0) {
-				LogErrorThreaded(lua_tostring(L, -1));
+				LogErrorThreaded(fmt::format("[command]: {}", lua_tostring(L, -1)));
 				break;
 			}
 			if (lua_isnil(L, -2) != 0) {
@@ -1166,7 +1179,7 @@ LuaEngine::LuaEngine()
 					int lineNum = std::stoi(err.substr(0, pos));
 					err = std::to_string(lineNum - 1) + err.substr(pos);
 				}
-				LogErrorThreaded(err);
+				LogErrorThreaded(fmt::format("[command]: {}", err));
 				break;
 			}
 			lua_pop(L, 1);
@@ -1174,7 +1187,7 @@ LuaEngine::LuaEngine()
 			lua_insert(L, -2);
 			int last = lua_gettop(L) - 2;
 			if (lua_pcall(L, 1, LUA_MULTRET, 0) != 0) {
-				LogErrorThreaded(lua_tostring(L, -1));
+				LogErrorThreaded(fmt::format("[command]: {}", lua_tostring(L, -1)));
 				break;
 			}
 			int cur = lua_gettop(L);
@@ -1188,7 +1201,7 @@ LuaEngine::LuaEngine()
 					}
 				}
 			} else {
-				LogErrorThreaded(lua_tostring(L, -1));
+				LogErrorThreaded(fmt::format("[command]: {}", lua_tostring(L, -1)));
 			}
 			BLOCK_END
 		}
@@ -1696,7 +1709,7 @@ void LuaEngine::removePeer(Object* object) {
 		lua_rawgeti(L, LUA_REGISTRYINDEX, TOLUA_REG_INDEX_UBOX); // ubox
 		lua_rawgeti(L, -1, refid); // ubox ud
 		if (!lua_toboolean(L, -1)) {
-			lua_pushvalue(L, TOLUA_NOPEER); // ubox ud nopeer
+			lua_pushnil(L);
 			lua_setuservalue(L, -2); // ud<nopeer>, ubox ud
 		}
 		lua_pop(L, 2); // empty

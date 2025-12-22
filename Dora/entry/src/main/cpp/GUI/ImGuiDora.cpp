@@ -358,7 +358,7 @@ static void DoraSetupTheme(Color color) {
 	colors[ImGuiCol_NavCursor] = HI(1.00f);
 	colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
 	colors[ImGuiCol_NavWindowingDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
-	colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
+	colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.10f, 0.10f, 0.10f, 0.8f);
 }
 
 int ImGuiDora::_lastIMEPosX;
@@ -973,7 +973,6 @@ bool ImGuiDora::init() {
 
 	ImGuiIO& io = ImGui::GetIO();
 	_iniFilePath = Path::concat({SharedContent.getAppPath(), "imgui.ini"sv});
-    SharedContent.remove(_iniFilePath);
 	io.IniFilename = _iniFilePath.c_str();
 
 	io.ConfigErrorRecoveryEnableAssert = false;
@@ -1104,7 +1103,7 @@ inline bool checkAvailTransientBuffers(uint32_t _numVertices, const bgfx::Vertex
 
 void ImGuiDora::render() {
 	ImDrawData* drawData = ImGui::GetDrawData();
-	if (!drawData || drawData->CmdListsCount == 0) {
+	if (drawData->CmdListsCount == 0) {
 		return;
 	}
 
@@ -1299,8 +1298,8 @@ void ImGuiDora::handleEvent(const SDL_Event& event) {
 			Size visualSize = SharedApplication.getVisualSize();
 			Size winSize = SharedApplication.getWinSize();
 			ImGui::GetIO().AddMousePosEvent(
-                s_cast<float>(event.motion.x) * visualSize.width / winSize.width,
-                s_cast<float>(event.motion.y) * visualSize.height / winSize.height);
+				s_cast<float>(event.motion.x) * visualSize.width / winSize.width,
+				s_cast<float>(event.motion.y) * visualSize.height / winSize.height);
 			break;
 		}
 		case SDL_KEYDOWN:
@@ -1319,7 +1318,7 @@ void ImGuiDora::handleEvent(const SDL_Event& event) {
 				sendKey(SDLK_RIGHT, size - _lastCursor);
 			}
 
-			auto newText = utf8_get_characters(event.text.text);
+			auto newText = CodeCvt::utf8_get_characters(event.text.text);
 			size_t start = _textEditing.size();
 			for (size_t i = 0; i < _textEditing.size(); i++) {
 				if (i >= newText.size() || newText[i] != _textEditing[i]) {
@@ -1334,7 +1333,7 @@ void ImGuiDora::handleEvent(const SDL_Event& event) {
 			start = length;
 			count = 0;
 			int lastPos = -1;
-			utf8_each_character(event.edit.text, [&](int stop, uint32_t code) {
+			CodeCvt::utf8_each_character(event.edit.text, [&](int stop, uint32_t code) {
 				if (count >= s_cast<int>(_textEditing.size()) || _textEditing[count] != code) {
 					start = lastPos + 1;
 					return true;
@@ -1353,7 +1352,7 @@ void ImGuiDora::handleEvent(const SDL_Event& event) {
 			break;
 		}
 		case SDL_TEXTEDITING: {
-			auto newText = utf8_get_characters(event.edit.text);
+			auto newText = CodeCvt::utf8_get_characters(event.edit.text);
 			if (newText.size() == _textEditing.size()) {
 				bool changed = false;
 				for (size_t i = 0; i < newText.size(); i++) {
@@ -1402,7 +1401,7 @@ void ImGuiDora::handleEvent(const SDL_Event& event) {
 			size_t start = length;
 			size_t count = 0;
 			int lastPos = -1;
-			utf8_each_character(event.edit.text, [&](int stop, uint32_t code) {
+			CodeCvt::utf8_each_character(event.edit.text, [&](int stop, uint32_t code) {
 				if (count >= _textEditing.size() || _textEditing[count] != code) {
 					start = lastPos + 1;
 					return true;
@@ -1415,7 +1414,7 @@ void ImGuiDora::handleEvent(const SDL_Event& event) {
 			e.type = SDL_TEXTINPUT;
 			memcpy(e.text.text, event.edit.text + start, length - start + 1);
 			_inputs.push_back(e);
-			int addCount = utf8_count_characters(e.text.text);
+			int addCount = CodeCvt::utf8_count_characters(e.text.text);
 			_lastCursor += addCount;
 			int32_t cursor = event.edit.start;
 			if (cursor > _lastCursor) {

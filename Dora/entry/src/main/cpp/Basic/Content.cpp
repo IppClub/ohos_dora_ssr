@@ -15,9 +15,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 #include "Event/Event.h"
 #include "Render/VGRender.h"
 
-#include <fstream>
-using std::ofstream;
-
 #if BX_PLATFORM_LINUX
 #include <limits.h>
 #include <unistd.h>
@@ -50,29 +47,6 @@ static void releaseFileData(void* _ptr, void* _userData) {
 	}
 }
 
-#if BX_PLATFORM_WINDOWS
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif // WIN32_LEAN_AND_MEAN
-#include <windows.h>
-std::string toMBString(const std::string& utf8Str) {
-	// Step 1: Convert UTF-8 to UTF-16 (wide string)
-	int wideLen = MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), -1, nullptr, 0);
-	if (wideLen == 0) return {};
-	std::wstring wideStr(wideLen, L'\0');
-	MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), -1, &wideStr[0], wideLen);
-	// Step 2: Convert UTF-16 to current code page (multibyte)
-	int mbLen = WideCharToMultiByte(CP_ACP, 0, wideStr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-	if (mbLen == 0) return {};
-	std::string mbStr(mbLen, '\0');
-	WideCharToMultiByte(CP_ACP, 0, wideStr.c_str(), -1, &mbStr[0], mbLen, nullptr, nullptr);
-	// Remove the null terminator appended by WideCharToMultiByte
-	if (!mbStr.empty() && mbStr.back() == '\0') {
-		mbStr.pop_back();
-	}
-	return mbStr;
-}
-#endif // BX_PLATFORM_WINDOWS
 
 #if BX_PLATFORM_ANDROID
 extern char *g_assetPath;
@@ -176,25 +150,10 @@ bool Content::move(String src, String dst) {
 }
 
 bool Content::save(String filename, String content) {
-	PROFILE("FileIO"_slice);
-	auto fullPathAndPackage = Content::getFullPathAndPackage(filename);
-	if (fullPathAndPackage.zipFile) {
-		Error("can not save file \"{}\" to a zip package", filename.toString());
-		return false;
-	}
-	auto fullPath = fullPathAndPackage.fullPath.empty() ? filename.toString() : fullPathAndPackage.fullPath;
-#if BX_PLATFORM_WINDOWS
-	fullPath = toMBString(fullPath);
-#endif
-	ofstream stream(fullPath, std::ios::trunc | std::ios::binary);
-	if (!stream) return false;
-	if (stream.write(content.rawData(), content.size())) {
-		return true;
-	}
-	return false;
+	return save(filename, r_cast<const uint8_t*>(content.rawData()), s_cast<int64_t>(content.size()));
 }
 
-bool Content::save(String filename, uint8_t* content, int64_t size) {
+bool Content::save(String filename, const uint8_t* content, int64_t size) {
 	PROFILE("FileIO"_slice);
 	auto fullPathAndPackage = Content::getFullPathAndPackage(filename);
 	if (fullPathAndPackage.zipFile) {
@@ -202,15 +161,16 @@ bool Content::save(String filename, uint8_t* content, int64_t size) {
 		return false;
 	}
 	auto fullPath = fullPathAndPackage.fullPath.empty() ? filename.toString() : fullPathAndPackage.fullPath;
-#if BX_PLATFORM_WINDOWS
-	fullPath = toMBString(fullPath);
-#endif
-	ofstream stream(fullPath, std::ios::trunc | std::ios::binary);
-	if (!stream) return false;
-	if (stream.write(r_cast<char*>(content), s_cast<std::streamsize>(size))) {
-		return true;
+	SDL_RWops* io = SDL_RWFromFile(fullPath.c_str(), "wb+");
+	if (!io) return false;
+	DEFER(SDL_RWclose(io));
+	if (size <= 0) return true;
+	size_t written = SDL_RWwrite(io, content, 1, size);
+	bool success = written == size;
+	if (!success) {
+		Error("failed to write to file {}", fullPath);
 	}
-	return false;
+	return success;
 }
 
 bool Content::remove(String filename) {
@@ -229,7 +189,10 @@ bool Content::remove(String filename) {
 
 bool Content::createFolder(String folder) {
 	fs::path path = folder.toString();
-	return fs::create_directories(path);
+	std::error_code err;
+	bool result = fs::create_directories(path, err);
+	WarnIf(err, "failed to create folder due to \"{}\".", err.message());
+	return result;
 }
 
 std::list<std::string> Content::getDirs(String path) {
@@ -250,11 +213,13 @@ std::list<std::string> Content::getAllFiles(String path) {
 	std::list<std::string> files;
 	if (Content::isFileExist(fullPath)) {
 		fs::path parentPath = fullPath;
-		for (const auto& item : fs::recursive_directory_iterator(parentPath)) {
+		std::error_code err;
+		for (const auto& item : fs::recursive_directory_iterator(parentPath, err)) {
 			if (!item.is_directory()) {
 				files.push_back(item.path().lexically_relative(parentPath).string());
 			}
 		}
+		WarnIf(err, "failed to get entry of \"{}\" due to \"{}\".", fullPath, err.message());
 	} else {
 		Error("Content failed to get entry of \"{}\"", fullPath);
 	}
@@ -397,26 +362,26 @@ void Content::insertSearchPath(int index, String path, bool withLock) {
 			if (Content::isPathFolder(searchPath)) {
 				if (index >= s_cast<int>(_searchPaths.size())) {
 					_searchPaths.push_back(searchPath);
-			} else {
-				_searchPaths.insert(_searchPaths.begin() + index, searchPath);
-				_fullPathCache.clear();
-			}
-		} else {
-			auto relativePath = fs::path(searchPath).lexically_relative(fs::path(Content::getAssetPath())).string();
-			auto relSlice = Slice(relativePath);
-			if (!relativePath.empty() && relSlice.left(3) != "..\\"_slice && relSlice.left(3) != "../"_slice) {
-				Error("can not set file \"{}\" under asset path as search package", path.toString());
-			} else {
-				auto zipFile = New<ZipFile>(searchPath);
-				if (zipFile->isOK()) {
-					if (index >= s_cast<int>(_searchPaths.size())) {
-						_searchPaths.push_back(searchPath);
-					} else {
-						_searchPaths.insert(_searchPaths.begin() + index, searchPath);
-						_fullPathCache.clear();
-					}
-					_searchZipPaths[searchPath] = std::move(zipFile);
 				} else {
+					_searchPaths.insert(_searchPaths.begin() + index, searchPath);
+					_fullPathCache.clear();
+				}
+			} else {
+				auto relativePath = fs::path(searchPath).lexically_relative(fs::path(Content::getAssetPath())).string();
+				auto relSlice = Slice(relativePath);
+				if (!relativePath.empty() && relSlice.left(3) != "..\\"_slice && relSlice.left(3) != "../"_slice) {
+					Error("can not set file \"{}\" under asset path as search package", path.toString());
+				} else {
+					auto zipFile = New<ZipFile>(searchPath);
+					if (zipFile->isOK()) {
+						if (index >= s_cast<int>(_searchPaths.size())) {
+							_searchPaths.push_back(searchPath);
+						} else {
+							_searchPaths.insert(_searchPaths.begin() + index, searchPath);
+							_fullPathCache.clear();
+						}
+						_searchZipPaths[searchPath] = std::move(zipFile);
+					} else {
 						Error("search path \"{}\" is neither a folder nor a zip file", path.toString());
 					}
 				}
@@ -495,13 +460,12 @@ bool Content::copyUnsafe(String src, String dst) {
 		for (const std::string& file : files) {
 			// Info("now copy file {}",file);
 			auto fullPath = (fs::path(dstPath) / file).string();
-#if BX_PLATFORM_WINDOWS
-			fullPath = toMBString(fullPath);
-#endif
-			ofstream stream(fullPath, std::ios::out | std::ios::trunc | std::ios::binary);
-			if (!stream) return false;
+			SDL_RWops* io = SDL_RWFromFile(fullPath.c_str(), "wb+");
+			if (!io) return false;
+			DEFER(SDL_RWclose(io));
 			bool result = Content::loadByChunks((fs::path(srcPath) / file).string(), [&](uint8_t* buffer, int size) {
-				if (!stream.write(r_cast<char*>(buffer), size)) {
+				size_t written = SDL_RWwrite(io, buffer, 1, s_cast<size_t>(size));
+				if (written != s_cast<size_t>(size)) {
 					Error("failed to copy to file \"{}\"", (fs::path(dstPath) / file).string());
 					return true;
 				}
@@ -513,16 +477,15 @@ bool Content::copyUnsafe(String src, String dst) {
 		}
 	} else {
 		auto fullPath = dst.toString();
-#if BX_PLATFORM_WINDOWS
-		fullPath = toMBString(fullPath);
-#endif
-		ofstream stream(fullPath, std::ios::out | std::ios::trunc | std::ios::binary);
-		if (!stream) {
+		SDL_RWops* io = SDL_RWFromFile(fullPath.c_str(), "wb+");
+		if (!io) {
 			Error("failed to open file: \"{}\"", dst.toString());
 			return false;
 		}
+		DEFER(SDL_RWclose(io));
 		bool result = Content::loadByChunks(src, [&](uint8_t* buffer, int size) {
-			if (!stream.write(r_cast<char*>(buffer), size)) {
+			size_t written = SDL_RWwrite(io, buffer, 1, s_cast<size_t>(size));
+			if (written != s_cast<size_t>(size)) {
 				Error("failed to copy to file \"{}\"", dst.toString());
 				return true;
 			}
@@ -727,13 +690,12 @@ void Content::unzipAsync(String zipFile, String folderPath, const std::function<
 			if (auto parent = Path::getPath(path); !exist(parent)) {
 				createFolder(parent);
 			}
-#if BX_PLATFORM_WINDOWS
-			path = toMBString(path);
-#endif
-			std::ofstream stream(path, std::ios::trunc | std::ios::binary);
-			if (stream) {
-				if (!zip->getFileDataByChunks(file, [&stream](uint8_t* data, size_t size) {
-						if (stream.write(r_cast<const char*>(data), size)) {
+			SDL_RWops* io = SDL_RWFromFile(path.c_str(), "wb+");
+			if (io) {
+				DEFER(SDL_RWclose(io));
+				if (!zip->getFileDataByChunks(file, [&io](uint8_t* data, size_t size) {
+						size_t written = SDL_RWwrite(io, data, 1, size);
+						if (written == size) {
 							return false;
 						}
 						return true;
@@ -756,6 +718,9 @@ void Content::unzipAsync(String zipFile, String folderPath, const std::function<
 }
 
 bool Content::exist(String filename) {
+	if (filename.trimSpace().empty()) {
+		return true;
+	}
 	return Content::isFileExist(Content::getFullPath(filename));
 }
 
@@ -845,6 +810,35 @@ uint8_t* Content::loadUnsafe(String filename, int64_t& size) {
 		Error("failed to load file: \"{}\"", fullPath);
 	}
 	return data;
+}
+
+std::string Content::loadUnsafe(String filename) {
+	if (filename.empty()) {
+		return {};
+	}
+	auto fullPathAndPackage = Content::getFullPathAndPackage(filename);
+	if (fullPathAndPackage.zipFile) {
+		return fullPathAndPackage.zipFile->getFileDataAsString(fullPathAndPackage.zipRelativePath);
+	}
+	std::string fullPath = fullPathAndPackage.fullPath;
+	std::string data;
+    bool loaded = false;
+    BLOCK_START {
+        FILE* fp = fopen(fullPath.c_str(), "rb");
+        BREAK_IF(!fp);
+        fseek(fp, 0, SEEK_END);
+        unsigned long dataSize = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        data.resize(dataSize);
+        dataSize = fread(data.data(), sizeof(data[0]), dataSize, fp);
+        fclose(fp);
+        loaded = true;
+    }
+    BLOCK_END
+    if (!loaded) {
+        Error("failed to load file: \"{}\"", fullPath);
+    }
+    return data;
 }
 
 bool Content::loadByChunks(String filename, const std::function<bool(uint8_t*, int)>& handler) {
@@ -961,15 +955,38 @@ uint8_t* Content::loadUnsafe(String filename, int64_t& size) {
 		return nullptr;
 	}
 	SDL_RWops* io = SDL_RWFromFile(fullPathAndPackage.fullPath.c_str(), "rb");
-	if (io == nullptr) {
+	if (!io) {
 		size = 0;
 		Error("failed to load file: \"{}\", due to: {}", filename.toString(), SDL_GetError());
 		return nullptr;
 	}
+	DEFER(SDL_RWclose(io));
 	size = SDL_RWsize(io);
 	uint8_t* buffer = new uint8_t[s_cast<size_t>(size)];
 	SDL_RWread(io, buffer, sizeof(uint8_t), s_cast<size_t>(size));
-	SDL_RWclose(io);
+	return buffer;
+}
+
+std::string Content::loadUnsafe(String filename) {
+	if (filename.empty()) return {};
+	auto fullPathAndPackage = Content::getFullPathAndPackage(filename);
+	if (fullPathAndPackage.zipFile) {
+		return fullPathAndPackage.zipFile->getFileDataAsString(fullPathAndPackage.zipRelativePath);
+	}
+	if (fullPathAndPackage.fullPath.empty()) {
+		Error("failed to load file: \"{}\", due to: can not locate full path", filename.toString());
+		return {};
+	}
+	SDL_RWops* io = SDL_RWFromFile(fullPathAndPackage.fullPath.c_str(), "rb");
+	if (!io) {
+		Error("failed to load file: \"{}\", due to: {}", filename.toString(), SDL_GetError());
+		return {};
+	}
+	DEFER(SDL_RWclose(io));
+	size_t size = s_cast<size_t>(SDL_RWsize(io));
+	std::string buffer;
+	buffer.resize(size);
+	SDL_RWread(io, buffer.data(), sizeof(uint8_t), size);
 	return buffer;
 }
 
@@ -980,19 +997,18 @@ bool Content::loadByChunks(String filename, const std::function<bool(uint8_t*, i
 		return fullPathAndPackage.zipFile->getFileDataByChunks(fullPathAndPackage.zipRelativePath, handler);
 	}
 	SDL_RWops* io = SDL_RWFromFile(fullPathAndPackage.fullPath.c_str(), "rb");
-	if (io == nullptr) {
+	if (!io) {
 		Error("failed to load file: \"{}\"", filename.toString());
 		return false;
 	}
+	DEFER(SDL_RWclose(io));
 	uint8_t buffer[DORA_COPY_BUFFER_SIZE];
 	int size = 0;
 	while ((size = s_cast<int>(SDL_RWread(io, buffer, sizeof(uint8_t), DORA_COPY_BUFFER_SIZE)))) {
 		if (handler(buffer, size)) {
-			SDL_RWclose(io);
 			return false;
 		}
 	}
-	SDL_RWclose(io);
 	return true;
 }
 

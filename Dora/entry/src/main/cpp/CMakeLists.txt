@@ -11,7 +11,7 @@
  # See the License for the specific language governing permissions and
  # limitations under the License.
 
-cmake_minimum_required(VERSION 3.4.1)
+cmake_minimum_required(VERSION 3.5.0)
 project(entry)
 
 set(env ${CMAKE_CURRENT_SOURCE_DIR})
@@ -44,7 +44,7 @@ include_directories(
 )
 
 link_directories(${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
-add_definitions(-DWITH_SDL2 -DBX_CONFIG_DEBUG=0 -Dd_m3HasWASI -DLUA_USE_LINUX -DSPDLOG_FMT_EXTERNAL)
+add_definitions(-DWITH_SDL2 -DBX_CONFIG_DEBUG=0 -Dd_m3HasWASI -DLUA_USE_LINUX -DSPDLOG_FMT_EXTERNAL -DDORA_NO_WA -DDORA_NO_RUST)
 
 add_library(entry SHARED
     ${CMAKE_CURRENT_SOURCE_DIR}/ohos/napi_init.cpp

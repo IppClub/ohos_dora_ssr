@@ -88,16 +88,6 @@
         },
         "reason": "$string:aware"
       },
-      {
-        "name": "ohos.permission.NETWORK_DHCP",
-        "usedScene": {
-          "abilities": [
-            "EntryAbility"
-          ],
-          "when": "inuse",
-        },
-        "reason": "$string:aware"
-      }
     ],
     "abilities": [
       {

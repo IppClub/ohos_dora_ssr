@@ -210,12 +210,12 @@ void EffekNode::render() {
 
 void EffekNode::cleanup() {
 	if (_flags.isOff(Node::Cleanup)) {
+		Node::cleanup();
 		auto manager = SharedEffekManager.instance->efkManager.Get();
 		for (auto& effek : _effeks) {
 			manager->StopEffect(effek->handle);
 		}
 		_effeks.clear();
-		Node::cleanup();
 	}
 }
 
@@ -243,6 +243,7 @@ void EffekNode::onExit() {
 }
 
 int EffekNode::play(String filename, const Vec2& pos, float z) {
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid EffekNode");
 	if (auto effect = SharedEffekManager.load(filename)) {
 		int handle = SharedEffekManager.instance->efkManager->Play(effect->effect, pos.x, pos.y, z);
 		_effeks.emplace_back(New<RunningEff>(handle, Vec3{pos.x, pos.y, z}, effect));
@@ -252,6 +253,7 @@ int EffekNode::play(String filename, const Vec2& pos, float z) {
 }
 
 void EffekNode::stop(int handle) {
+	AssertIf(_flags.isOn(Node::Cleanup), "can not operate on an invalid EffekNode");
 	SharedEffekManager.instance->efkManager->StopEffect(handle);
 }
 
